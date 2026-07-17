@@ -37,15 +37,14 @@
       "content": "البوت تحت الصيانه ⚠ || سيتم تحديث خدمات البوت في اقرب وقت شكرا لتفهمكم",
       "parent_id": null,
       "password": ""
-    }
-  ],
+      {
+  "buttons": [],
+  "banned_users": [],
   "users": [
     8097008430
   ],
-  "banned_users": [],
-  "buttons": [],
   "required_channels": [
     "@Salemly_1",
     "@shr_llh"
   ]
-} 
+}
