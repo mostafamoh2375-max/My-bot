@@ -13,7 +13,8 @@ DB_FILE = "buttons.json"
 USERS_FILE = "users.json"
 
 # Bot token (required)
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
+
 if not TOKEN:
     # Fail fast, clearly — avoids creating a bot instance with None token
     sys.stderr.write("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.\n")
