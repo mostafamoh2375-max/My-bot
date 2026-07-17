@@ -40,11 +40,10 @@
       {
   "buttons": [],
   "banned_users": [],
-  "users": [
-    8097008430
-  ],
+  "users": [8097008430],
   "required_channels": [
     "@Salemly_1",
     "@shr_llh"
   ]
-}
+    }
+
