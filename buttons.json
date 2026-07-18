@@ -35,15 +35,22 @@
       "name": "جديد",
       "content_type": "text",
       "content": "البوت تحت الصيانه ⚠ || سيتم تحديث خدمات البوت في اقرب وقت شكرا لتفهمكم",
-      "parent_id": null,
+        "parent_id": null,
       "password": ""
-      {
+    }
+  ],
+  "users": [
+    8097008430
+  ],
+  "banned_users": []
+}
+{
   "buttons": [],
+  "users": [],
   "banned_users": [],
-  "users": [8097008430],
   "required_channels": [
     "@Salemly_1",
     "@shr_llh"
   ]
-    }
+}
 
