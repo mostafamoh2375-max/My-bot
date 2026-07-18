@@ -13,7 +13,7 @@ DB_FILE = "buttons.json"
 USERS_FILE = "users.json"
 
 # Bot token (required)
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 if not TOKEN:
     # Fail fast, clearly — avoids creating a bot instance with None token
@@ -29,6 +29,39 @@ bot = telebot.TeleBot(TOKEN, threaded=True)
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# Startup diagnostics: validate token and detect existing webhook (best-effort).
+try:
+    # Verify token is valid and get bot identity
+    me = bot.get_me()
+    if isinstance(me, dict):
+        first_name = me.get("first_name")
+        username = me.get("username")
+        bot_id = me.get("id")
+    else:
+        first_name = getattr(me, "first_name", None)
+        username = getattr(me, "username", None)
+        bot_id = getattr(me, "id", None)
+    logger.info("Bot identity verified: %s (@%s, id=%s)", first_name, username, bot_id)
+except Exception as e:
+    logger.exception("Failed to validate TELEGRAM_BOT_TOKEN with getMe(): %s", e)
+    raise
+
+try:
+    url = None
+    if hasattr(bot, "get_webhook_info"):
+        info = bot.get_webhook_info()
+        if isinstance(info, dict):
+            url = info.get("url") or (info.get("result", {}) or {}).get("url")
+        else:
+            url = getattr(info, "url", None)
+    if url:
+        logger.warning(
+            "Telegram webhook is set for this token: %s. Polling (getUpdates) may not receive updates while webhook is active.",
+            url,
+        )
+except Exception:
+    logger.debug("Could not retrieve webhook info at startup; continuing to polling.")
 
 
 def report_admin_error(exc: Exception, context: str = ""):
