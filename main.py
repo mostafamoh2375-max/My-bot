@@ -348,3 +348,30 @@ def send_content(cid, btn, back_markup):
         report_admin_error(e, "send_content")
 
 # (rest of file unchanged)
+
+
+# ---- start bot (append at end of file) ----
+def _run_polling_loop():
+    """Run the bot polling loop forever, restarting on exceptions."""
+    while True:
+        try:
+            logger.info("Starting Telegram polling...")
+            # Try to use infinity_polling (recommended in newer pyTelegramBotAPI).
+            if hasattr(bot, "infinity_polling"):
+                # use reasonable timeouts to avoid hanging forever
+                bot.infinity_polling(timeout=60, long_polling_timeout=60)
+            else:
+                # Fallback to classic polling; none_stop=True keeps it running
+                bot.polling(none_stop=True, timeout=60)
+        except Exception as exc:
+            # Log and notify admin, then sleep briefly before restart to avoid tight loop.
+            logger.exception("Polling crashed, will restart after delay: %s", exc)
+            try:
+                report_admin_error(exc, "polling")
+            except Exception:
+                logger.exception("Failed to report error to admin")
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    _run_polling_loop()
