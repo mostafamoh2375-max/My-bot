@@ -43,6 +43,8 @@ try:
         username = getattr(me, "username", None)
         bot_id = getattr(me, "id", None)
     logger.info("Bot identity verified: %s (@%s, id=%s)", first_name, username, bot_id)
+    # Also print to stdout so hosting platforms show the identity prominently
+    print(f"Bot running as: @{username or 'unknown'} (id: {bot_id})", flush=True)
 except Exception as e:
     logger.exception("Failed to validate TELEGRAM_BOT_TOKEN with getMe(): %s", e)
     raise
