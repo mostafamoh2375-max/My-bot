@@ -406,19 +406,12 @@ def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"))
     markup.add(types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
-    markup.add(
-        types.InlineKeyboardButton(
-            "🔑 تعيين/تغيير كلمة مرور", callback_data="adm_setpw"
-        )
-    )
-    markup.add(
-        types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users")
-    )
-    markup.add(
-        types.InlineKeyboardButton("📣 إرسال إعلان", callback_data="adm_broadcast")
-    )
+    markup.add(types.InlineKeyboardButton("🔑 تعيين/تغيير كلمة مرور", callback_data="adm_setpw"))
+    markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"))
+    markup.add(types.InlineKeyboardButton("📣 إرسال إعلان", callback_data="adm_broadcast"))
+    # الزر الجديد المطور:
+    markup.add(types.InlineKeyboardButton("⚙️ إعدادات الأزرار", callback_data="adm_settings_list"))
     return markup
-
 
 @bot.message_handler(commands=["admin"])
 def admin(message):
@@ -431,6 +424,32 @@ def admin(message):
         f"🔧 لوحة التحكم\nإجمالي الأزرار: {len(db['buttons'])}",
         reply_markup=admin_menu_markup(),
     )
+
+@bot.callback_query_handler(func=lambda call: call.data == "adm_settings_list")
+def list_buttons_for_settings(call):
+    db = load_db()
+    markup = types.InlineKeyboardMarkup()
+    for btn in db["buttons"]:
+        markup.add(types.InlineKeyboardButton(btn["name"], callback_data=f"adm_edit_{btn['id']}"))
+    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main")) # تأكد أن لديك دالة للرجوع
+    bot.edit_message_text("اختر الزر لتعديل إعداداته:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_edit_"))
+def edit_btn_settings(call):
+    btn_id = call.data.split("_")[2]
+    db = load_db()
+    btn = get_button(db, btn_id)
+    if not btn: return
+    
+    if "settings" not in btn:
+        btn["settings"] = {"points": "0", "status": "on"}
+        save_db(db)
+        
+    markup = types.InlineKeyboardMarkup()
+    for key, val in btn["settings"].items():
+        markup.add(types.InlineKeyboardButton(f"{key}: {val}", callback_data=f"change_{btn_id}_{key}"))
+    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_settings_list"))
+    bot.edit_message_text(f"إعدادات «{btn['name']}»:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 
 # ═══════════════════════════════════════════════════════════════
