@@ -989,10 +989,10 @@ def finish_update(message, btn_id, key):
     bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
 
 
-
 # معالج أزرار الهدية والاشتراك الإجباري الجديدة
 @bot.callback_query_handler(func=lambda call: call.data in ["adm_feat_gift", "adm_feat_sub"])
 def handle_gift_and_sub_features(call):
+    bot.answer_callback_query(call.id)  # ضع هذا السطر هنا في البداية تماماً
     data = call.data
     cid = call.message.chat.id
     mid = call.message.message_id
