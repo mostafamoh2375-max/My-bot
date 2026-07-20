@@ -936,6 +936,30 @@ def handle_state(message):
         bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
 
 
+# دالة استقبال التعديل الجديد (أضفها في نهاية الملف)
+def update_json_setting(btn_id, key, new_value):
+    db = load_db()
+    for btn in db["buttons"]:
+        if btn["id"] == btn_id:
+            # تحديث القيمة في قاموس الإعدادات
+            btn["settings"][key] = new_value
+            break
+    save_db(db)
+
+# دالة التعامل مع ضغط زر الإعداد (أضفها مع دوال الـ callback)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("change_"))
+def handle_change_setting(call):
+    btn_id = call.data.split("_")[1]
+    key = call.data.split("_")[2]
+    
+    msg = bot.send_message(call.message.chat.id, f"أرسل القيمة الجديدة لـ {key}:")
+    bot.register_next_step_handler(msg, lambda m: finish_update(m, btn_id, key))
+
+def finish_update(message, btn_id, key):
+    update_json_setting(btn_id, key, message.text)
+    bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
+
+
 # ═══════════════════════════════════════════════════════════════
 #  RUN
 # ═══════════════════════════════════════════════════════════════
