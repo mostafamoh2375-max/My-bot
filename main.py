@@ -989,6 +989,25 @@ def finish_update(message, btn_id, key):
     bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
 
 
+
+# معالج أزرار الهدية والاشتراك الإجباري الجديدة
+@bot.callback_query_handler(func=lambda call: call.data in ["adm_feat_gift", "adm_feat_sub"])
+def handle_gift_and_sub_features(call):
+    data = call.data
+    cid = call.message.chat.id
+    mid = call.message.message_id
+    
+    if data == "adm_feat_gift":
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+        bot.edit_message_text("⚙️ إعدادات الهدية اليومية:\nحالة الهدية: مفعلة ✅", cid, mid, reply_markup=markup)
+                             
+    elif data == "adm_feat_sub":
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+        bot.edit_message_text("🛡 إدارة الاشتراك الإجباري:\nحالة الاشتراك: مفعل ✅", cid, mid, reply_markup=markup)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  RUN
 # ═══════════════════════════════════════════════════════════════
