@@ -404,13 +404,14 @@ def start(message):
 
 def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"))
-    markup.add(types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
-    markup.add(types.InlineKeyboardButton("🔑 تعيين/تغيير كلمة مرور", callback_data="adm_setpw"))
-    markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"))
-    markup.add(types.InlineKeyboardButton("📣 إرسال إعلان", callback_data="adm_broadcast"))
-    # الزر الجديد المطور:
-    markup.add(types.InlineKeyboardButton("⚙️ إعدادات الأزرار", callback_data="adm_settings_list"))
+    # إدارة الخدمات
+    markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
+    # إدارة الميزات
+    markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
+    markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
+    # الإدارة العامة
+    markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"), types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
+    markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"), types.InlineKeyboardButton("📣 إرسال إعلان", callback_data="adm_broadcast"))
     return markup
 
 @bot.message_handler(commands=["admin"])
@@ -446,10 +447,12 @@ def edit_btn_settings(call):
         save_db(db)
         
     markup = types.InlineKeyboardMarkup()
-    for key, val in btn["settings"].items():
-        markup.add(types.InlineKeyboardButton(f"{key}: {val}", callback_data=f"change_{btn_id}_{key}"))
+    markup.add(types.InlineKeyboardButton("✏️ تغيير الاسم", callback_data=f"change_{btn_id}_name"))
+    markup.add(types.InlineKeyboardButton("📝 تغيير المحتوى", callback_data=f"change_{btn_id}_content"))
+    markup.add(types.InlineKeyboardButton(f"⭐ النقاط: {btn.get('settings', {}).get('points', '0')}", callback_data=f"change_{btn_id}_points"))
     markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_settings_list"))
-    bot.edit_message_text(f"إعدادات «{btn['name']}»:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    
+    bot.edit_message_text(f"تحكم في الزر «{btn['name']}»:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -465,6 +468,13 @@ def callback(call):
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
+                # إضافة هذه الأسطر لربط الأزرار الجديدة
+        if data == "adm_back_main":
+            admin(call.message)
+            return
+        if data == "adm_settings_list":
+            list_buttons_for_settings(call)
+            return
 
         # ── User navigation ────────────────────────────────────────────────
         if data.startswith("nav_"):
