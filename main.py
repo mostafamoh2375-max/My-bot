@@ -470,7 +470,7 @@ def callback(call):
         mid = call.message.message_id
                 # إضافة هذه الأسطر لربط الأزرار الجديدة
         if data == "adm_back_main":
-            admin(call.message)
+            bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
             return
         if data == "adm_settings_list":
             list_buttons_for_settings(call)
@@ -987,6 +987,20 @@ def handle_change_setting(call):
 def finish_update(message, btn_id, key):
     update_json_setting(btn_id, key, message.text)
     bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_feat_"))
+def admin_features(call):
+    data = call.data
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+
+    if data == "adm_feat_gift":
+        bot.edit_message_text("⚙️ إعدادات الهدية اليومية:\nحالة الهدية: مفعلة ✅", 
+                             call.message.chat.id, call.message.message_id, reply_markup=markup)
+    elif data == "adm_feat_sub":
+        bot.edit_message_text("🛡 إعدادات الاشتراك الإجباري:\nحالة الاشتراك: مفعل ✅", 
+                             call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 
 # ═══════════════════════════════════════════════════════════════
