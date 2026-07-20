@@ -989,20 +989,6 @@ def finish_update(message, btn_id, key):
     bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_feat_"))
-def admin_features(call):
-    data = call.data
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-
-    if data == "adm_feat_gift":
-        bot.edit_message_text("⚙️ إعدادات الهدية اليومية:\nحالة الهدية: مفعلة ✅", 
-                             call.message.chat.id, call.message.message_id, reply_markup=markup)
-    elif data == "adm_feat_sub":
-        bot.edit_message_text("🛡 إعدادات الاشتراك الإجباري:\nحالة الاشتراك: مفعل ✅", 
-                             call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-
 # ═══════════════════════════════════════════════════════════════
 #  RUN
 # ═══════════════════════════════════════════════════════════════
