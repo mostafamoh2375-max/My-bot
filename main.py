@@ -469,7 +469,7 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
                 # ── لوحة التحكم الديناميكية الشاملة (الهدية اليومية والاشتراك الإجباري) ──
-                        if data == "adm_feat_gift":
+        if data == "adm_feat_gift":
             db = load_db()
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
@@ -479,23 +479,6 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
                 "⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• الحالة: مفعلة ✅\n• النقاط: (افتراضي)\n\nاختر إجراء التعديل:", 
-                cid, mid, reply_markup=markup
-            )
-            return
-
-        if data == "adm_feat_sub":
-            markup = types.InlineKeyboardMarkup(row_width=2)
-            markup.add(
-                types.InlineKeyboardButton("📋 عرض القنوات", callback_data="list_sub_channels"),
-                types.InlineKeyboardButton("➕ إضافة قناة", callback_data="add_sub_channel")
-            )
-            markup.add(
-                types.InlineKeyboardButton("🗑 إزالة قناة", callback_data="remove_sub_channel"),
-                types.InlineKeyboardButton("🔄 تفعيل/إيقاف", callback_data="toggle_sub_status")
-            )
-            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-            bot.edit_message_text(
-                "🛡 إدارة الاشتراك الإجباري المتقدمة:\n\n• الحالة: مفعل ✅\n• القنوات: تدار عبر هذا الزر\n\nاختر إجراء التحكم:", 
                 cid, mid, reply_markup=markup
             )
             return
