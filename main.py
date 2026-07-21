@@ -1079,6 +1079,30 @@ def finish_update(message, btn_id, key):
     update_json_setting(btn_id, key, message.text)
     bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
 
+def save_new_gift_points(message):
+    try:
+        new_pts = int(message.text)
+        db = load_db()
+        db["gift_points"] = new_pts
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الهدية اليومية بنجاح إلى: {new_pts} نقطة.")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+
+def save_new_gift_name(message):
+    new_name = message.text.strip()
+    db = load_db()
+    db["gift_name"] = new_name
+    save_db(db)
+    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الهدية إلى: {new_name}")
+
+def save_new_sub_name(message):
+    new_name = message.text.strip()
+    db = load_db()
+    db["sub_name"] = new_name
+    save_db(db)
+    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الاشتراك الإجباري إلى: {new_name}")
+
 
 # ═══════════════════════════════════════════════════════════════
 #  RUN
