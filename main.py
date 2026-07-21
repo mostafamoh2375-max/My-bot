@@ -468,17 +468,56 @@ def callback(call):
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
-                # ── أزرار إدارة الهدية اليومية والاشتراك الإجباري (الحل القاطع) ──
-        if data == "adm_feat_gift":
-            markup = types.InlineKeyboardMarkup()
+                # ── لوحة التحكم الديناميكية الشاملة (الهدية اليومية والاشتراك الإجباري) ──
+                        if data == "adm_feat_gift":
+            db = load_db()
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("🔄 تغيير حالة الهدية", callback_data="toggle_gift_status"),
+                types.InlineKeyboardButton("🎁 تعديل النقاط", callback_data="edit_gift_points")
+            )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-            bot.edit_message_text("⚙️ إعدادات الهدية اليومية:\nحالة الهدية: مفعلة ✅", cid, mid, reply_markup=markup)
+            bot.edit_message_text(
+                "⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• الحالة: مفعلة ✅\n• النقاط: (افتراضي)\n\nاختر إجراء التعديل:", 
+                cid, mid, reply_markup=markup
+            )
             return
 
         if data == "adm_feat_sub":
-            markup = types.InlineKeyboardMarkup()
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("📋 عرض القنوات", callback_data="list_sub_channels"),
+                types.InlineKeyboardButton("➕ إضافة قناة", callback_data="add_sub_channel")
+            )
+            markup.add(
+                types.InlineKeyboardButton("🗑 إزالة قناة", callback_data="remove_sub_channel"),
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف", callback_data="toggle_sub_status")
+            )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-            bot.edit_message_text("🛡 إدارة الاشتراك الإجباري:\nحالة الاشتراك: مفعل ✅", cid, mid, reply_markup=markup)
+            bot.edit_message_text(
+                "🛡 إدارة الاشتراك الإجباري المتقدمة:\n\n• الحالة: مفعل ✅\n• القنوات: تدار عبر هذا الزر\n\nاختر إجراء التحكم:", 
+                cid, mid, reply_markup=markup
+            )
+            return
+
+        if data == "adm_feat_sub":
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("📋 عرض القنوات المضافة", callback_data="list_sub_channels"),
+                types.InlineKeyboardButton("➕ إضافة قناة جديدة", callback_data="add_sub_channel")
+            )
+            markup.add(
+                types.InlineKeyboardButton("🗑 إزالة قناة", callback_data="remove_sub_channel"),
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف الاشتراك", callback_data="toggle_sub_status")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                "🛡 **إدارة الاشتراك الإجباري المتقدمة:**\n\n"
+                "• الحالة: مفعل ✅\n"
+                "• القنوات المرتبطة: تدار عبر هذا الزر\n\n"
+                "اختر إجراء التحكم المطلوب:", 
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
             return
 
                 # إضافة هذه الأسطر لربط الأزرار الجديدة
