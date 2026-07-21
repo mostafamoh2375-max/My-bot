@@ -30,7 +30,6 @@ USERS_FILE = "users.json"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
 
 if not TOKEN:
-    # Fail fast, clearly — avoids creating a bot instance with None token
     sys.stderr.write("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.\n")
     raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
 
@@ -50,21 +49,16 @@ def report_admin_error(exc: Exception, context: str = ""):
     try:
         logger.exception("Unhandled exception in %s: %s", context, exc)
     except Exception:
-        # best-effort logging; don't fail if logging itself errors
         pass
     try:
-        # Short admin message (avoid sending huge traces into chat)
         bot.send_message(
             ADMIN_ID,
             f"⚠️ Error in bot ({context}):\n{type(exc).__name__}: {str(exc)[:300]}",
         )
     except Exception:
-        # If sending to admin fails, just swallow — we already logged
         logger.exception("Failed to send error message to ADMIN_ID")
 
 # ── Force-subscribe channels ────────────────────────────────────
-# Add channel usernames (e.g. '@mychannel') or numeric IDs here.
-# Leave empty to disable the force-subscribe check entirely.
 REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
 # ═══════════════════════════════════════════════════════════════
@@ -74,12 +68,11 @@ REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 user_states = {}  # uid → state string
 user_data = {}  # uid → dict of temporary data
 
-# State constants
 WAIT_BTN_NAME = "WAIT_BTN_NAME"
 WAIT_BTN_CONTENT = "WAIT_BTN_CONTENT"
-WAIT_BTN_PASSWORD = "WAIT_BTN_PASSWORD"  # admin: optional password after content
-WAIT_SET_PW_PICK = "WAIT_SET_PW_PICK"  # admin: change pw on existing button
-WAIT_PASSWORD_INPUT = "WAIT_PASSWORD_INPUT"  # user: entering password for locked button
+WAIT_BTN_PASSWORD = "WAIT_BTN_PASSWORD"  
+WAIT_SET_PW_PICK = "WAIT_SET_PW_PICK"  
+WAIT_PASSWORD_INPUT = "WAIT_PASSWORD_INPUT"  
 WAIT_BROADCAST = "WAIT_BROADCAST"
 WAIT_BAN = "WAIT_BAN"
 WAIT_UNBAN = "WAIT_UNBAN"
@@ -107,10 +100,9 @@ def get_data(uid):
 #  DATABASE
 # ═══════════════════════════════════════════════════════════════
 
-
 def load_db():
     if not os.path.exists(DB_FILE):
-        default = {"buttons": [], "users": [], "banned_users": []}
+        default = {"buttons": [], "users": [], "banned_users": [], "gift_points": 2, "gift_name": "الهدية اليومية", "sub_active": True}
         save_db(default)
         return default
     with open(DB_FILE, "r", encoding="utf-8") as f:
@@ -118,6 +110,9 @@ def load_db():
     data.setdefault("buttons", [])
     data.setdefault("users", [])
     data.setdefault("banned_users", [])
+    data.setdefault("gift_points", 2)
+    data.setdefault("gift_name", "الهدية اليومية")
+    data.setdefault("sub_active", True)
     return data
 
 
@@ -134,7 +129,6 @@ def register_user(user_id):
 
 
 # ── Points system (users.json) ──────────────────────────────────
-
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -153,15 +147,12 @@ def save_users(data):
 
 
 def register_user_points(user_id, name=""):
-    """Ensure the user exists in users.json with a points field (default 0).
-    Never overwrites an existing points balance."""
     data = load_users()
     uid = str(user_id)
     if uid not in data["users"]:
         data["users"][uid] = {"name": name, "points": 0}
         save_users(data)
     else:
-        # Update name if provided and points key is missing (safety migration)
         changed = False
         if name and data["users"][uid].get("name") != name:
             data["users"][uid]["name"] = name
@@ -175,40 +166,43 @@ def register_user_points(user_id, name=""):
 
 # ── Force-subscribe check ───────────────────────────────────────
 
-
 def check_subscription(user_id):
-    """Return list of channel IDs the user has NOT joined.
-    Empty list means all checks passed (or REQUIRED_CHANNELS is empty)."""
+    db = load_db()
+    if not db.get("sub_active", True):
+        return []
+    
     not_subscribed = []
-    for channel in REQUIRED_CHANNELS:
+    channels = db.get("sub_channels", REQUIRED_CHANNELS)
+    for channel in channels:
         try:
             member = bot.get_chat_member(channel, user_id)
             if member.status in ("left", "kicked"):
                 not_subscribed.append(channel)
         except Exception as e:
-            # Can't verify → treat as not subscribed to be safe
             logger.exception("check_subscription failed for %s: %s", channel, e)
             not_subscribed.append(channel)
     return not_subscribed
 
 
-# ── Daily gift ──────────────────────────────────────────────────
+# ── Daily gift (Dynamic from DB) ────────────────────────────────
 
-GIFT_POINTS = 2
 GIFT_INTERVAL = 86400  # 24 hours in seconds
 
 
 def claim_daily_gift(user_id):
-    """Try to claim the daily gift.
-    Returns (success: bool, message_ar: str)."""
-    data = load_users()
+    """Try to claim the daily gift using values saved in database."""
+    users_data = load_users()
+    db = load_db()
+    
     uid = str(user_id)
-    if uid not in data["users"]:
+    if uid not in users_data["users"]:
         return False, "⚠️ سجّل أولاً بإرسال /start"
-    user = data["users"][uid]
+        
+    user = users_data["users"][uid]
     now = time.time()
     last = user.get("last_gift", 0)
     elapsed = now - last
+    
     if elapsed < GIFT_INTERVAL:
         remaining = GIFT_INTERVAL - elapsed
         hours = int(remaining // 3600)
@@ -217,11 +211,17 @@ def claim_daily_gift(user_id):
             f"⏳ لقد حصلت على هديتك اليومية بالفعل.\n"
             f"يمكنك المطالبة مجدداً بعد: {hours} ساعة و {minutes} دقيقة."
         )
-    user["points"] = user.get("points", 0) + GIFT_POINTS
+        
+    # جلب النقاط المُعينة من لوحة التحكم (الافتراضي 2)
+    current_gift_points = db.get("gift_points", 2)
+    
+    user["points"] = user.get("points", 0) + current_gift_points
     user["last_gift"] = now
-    save_users(data)
+    save_users(users_data)
+    
+    gift_name = db.get("gift_name", "الهدية اليومية")
     return True, (
-        f"🎁 تهانينا! حصلت على {GIFT_POINTS} نقاط!\n"
+        f"🎁 تهانينا! حصلت على {current_gift_points} نقاط من ({gift_name})!\n"
         f"رصيدك الحالي: {user['points']} نقطة 🌟"
     )
 
@@ -253,9 +253,7 @@ def new_id():
 #  CONTENT HELPERS
 # ═══════════════════════════════════════════════════════════════
 
-
 def extract_content(message):
-    """Return (content_type, file_id_or_text) from any message type."""
     ct = message.content_type
     if ct == "text":
         return "text", message.text.strip()
@@ -276,7 +274,6 @@ def extract_content(message):
 
 
 def send_content(cid, btn, back_markup):
-    """Send a button's stored content to the user."""
     ct = btn.get("content_type", "text")
     content = btn.get("content", "")
     name = btn.get("name", "")
@@ -313,10 +310,7 @@ def send_content(cid, btn, back_markup):
 #  NAVIGATION MARKUP
 # ═══════════════════════════════════════════════════════════════
 
-
 def build_nav_markup(db, parent_id=None):
-    """Inline keyboard of children, plus 🔙 if not at root.
-    At root level, appends the 🎁 Daily Gift button."""
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     for btn in children:
@@ -332,15 +326,15 @@ def build_nav_markup(db, parent_id=None):
             )
         )
     else:
-        # Root level — add the Daily Gift button
+        db_data = load_db()
+        gift_name = db_data.get("gift_name", "الهدية اليومية")
         markup.add(
-            types.InlineKeyboardButton("🎁 الهدية اليومية", callback_data="gift_claim")
+            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim")
         )
     return markup
 
 
 def back_only_markup(btn):
-    """Single 🔙 button pointing to the button's parent level."""
     parent_id = btn.get("parent_id")
     markup = types.InlineKeyboardMarkup()
     markup.add(
@@ -351,10 +345,9 @@ def back_only_markup(btn):
     return markup
 
 
-# ═══════════���═══════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 #  /start
 # ═══════════════════════════════════════════════════════════════
-
 
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -365,8 +358,7 @@ def start(message):
     name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or ""
     register_user_points(u.id, name)
 
-    # ── Force-subscribe gate (admin always bypasses) ────────────
-    if u.id != ADMIN_ID and REQUIRED_CHANNELS:
+    if u.id != ADMIN_ID:
         missing = check_subscription(u.id)
         if missing:
             markup = types.InlineKeyboardMarkup()
@@ -401,15 +393,11 @@ def start(message):
 #  /admin
 # ═══════════════════════════════════════════════════════════════
 
-
 def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
-    # إدارة الخدمات
     markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
-    # إدارة الميزات
     markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
     markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
-    # الإدارة العامة
     markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"), types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
     markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"), types.InlineKeyboardButton("📣 إرسال إعلان", callback_data="adm_broadcast"))
     return markup
@@ -432,7 +420,7 @@ def list_buttons_for_settings(call):
     markup = types.InlineKeyboardMarkup()
     for btn in db["buttons"]:
         markup.add(types.InlineKeyboardButton(btn["name"], callback_data=f"adm_edit_{btn['id']}"))
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main")) # تأكد أن لديك دالة للرجوع
+    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
     bot.edit_message_text("اختر الزر لتعديل إعداداته:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("adm_edit_"))
@@ -459,19 +447,18 @@ def edit_btn_settings(call):
 #  CALLBACK HANDLER
 # ═══════════════════════════════════════════════════════════════
 
-
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
-    bot.answer_callback_query(call.id)  # Always first — kills the loading spinner
+    bot.answer_callback_query(call.id)  
     try:
         data = call.data
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
-            # 1. إعدادات الهدية اليومية الرئيسية
+
         if data == "adm_feat_gift":
             db = load_db()
-            current_points = db.get("gift_points", 5) # افتراضي 5 نقاط
+            current_points = db.get("gift_points", 2)
             gift_name = db.get("gift_name", "الهدية اليومية")
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
@@ -489,10 +476,9 @@ def callback(call):
             )
             return
 
-        # 2. أزرار الهدية الوظيفية الحقيقية
         if data == "show_gift_points":
             db = load_db()
-            pts = db.get("gift_points", 5)
+            pts = db.get("gift_points", 2)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_gift"))
             bot.edit_message_text(f"🎁 عدد النقاط الحالي الممنوح في الهدية اليومية هو: **{pts}** نقطة.", cid, mid, reply_markup=markup, parse_mode="Markdown")
@@ -544,16 +530,32 @@ def callback(call):
             bot.edit_message_text(f"🔄 تم تغيير حالة الهدية بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
             return
 
-        if data in ["list_sub_channels", "add_sub_channel", "remove_sub_channel", "toggle_sub_status"]:
+        if data == "toggle_sub_status":
+            db = load_db()
+            current_status = db.get("sub_active", True)
+            db["sub_active"] = not current_status
+            save_db(db)
+            status_text = "مفعل ✅" if db["sub_active"] else "معطل ❌"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_sub"))
+            bot.edit_message_text(f"🔄 تم تغيير حالة الاشتراك الإجباري بنجاح!\nالحالة الآن: {status_text}", cid, mid, reply_markup=markup)
+            return
+
+        if data == "list_sub_channels":
+            db = load_db()
+            channels = db.get("sub_channels", REQUIRED_CHANNELS)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
-            bot.edit_message_text(
-                "🛠 تم تفعيل هذا القسم لتنفيذ إدارة القنوات والاشتراك الإجباري بشكل تفاعلي ومباشر.", 
-                cid, mid, reply_markup=markup
-            )
+            if channels:
+                ch_list = "\n".join([f"• {ch}" for ch in channels])
+                bot.edit_message_text(f"📋 القنوات المضافة حالياً للاشتراك الإجباري:\n\n{ch_list}", cid, mid, reply_markup=markup, parse_mode="Markdown")
+            else:
+                bot.edit_message_text("📋 لا توجد أي قنوات مضافة حالياً للاشتراك الإجباري.", cid, mid, reply_markup=markup)
             return
 
         if data == "adm_feat_sub":
+            db = load_db()
+            sub_st = "مفعل ✅" if db.get("sub_active", True) else "معطل ❌"
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
                 types.InlineKeyboardButton("📋 عرض القنوات المضافة", callback_data="list_sub_channels"),
@@ -565,15 +567,14 @@ def callback(call):
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                "🛡 **إدارة الاشتراك الإجباري المتقدمة:**\n\n"
-                "• الحالة: مفعل ✅\n"
-                "• القنوات المرتبطة: تدار عبر هذا الزر\n\n"
-                "اختر إجراء التحكم المطلوب:", 
+                f"🛡 **إدارة الاشتراك الإجباري المتقدمة:**\n\n"
+                f"• الحالة: {sub_st}\n"
+                f"• القنوات المرتبطة: تدار عبر هذا الزر\n\n"
+                f"اختر إجراء التحكم المطلوب:", 
                 cid, mid, reply_markup=markup, parse_mode="Markdown"
             )
             return
 
-                # إضافة هذه الأسطر لربط الأزرار الجديدة
         if data == "adm_back_main":
             bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
             return
@@ -581,7 +582,6 @@ def callback(call):
             list_buttons_for_settings(call)
             return
 
-        # ── User navigation ────────────────────────────────────────────────
         if data.startswith("nav_"):
             db = load_db()
 
@@ -589,7 +589,6 @@ def callback(call):
                 bot.send_message(cid, "⛔ أنت محظور من استخدام هذا البوت.")
                 return
 
-            # Back button
             if data.startswith("nav_back_"):
                 target = data[len("nav_back_") :]
                 parent_id = None if target == "root" else target
@@ -599,9 +598,6 @@ def callback(call):
                     else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
                 )
                 nav_markup = build_nav_markup(db, parent_id)
-                # Media messages (photo, video, etc.) have no text field —
-                # edit_message_text would crash with "no text in the message".
-                # Delete the media message and send a fresh text message instead.
                 if call.message.content_type != "text":
                     try:
                         bot.delete_message(cid, mid)
@@ -612,7 +608,6 @@ def callback(call):
                     bot.edit_message_text(text, cid, mid, reply_markup=nav_markup)
                 return
 
-            # Forward into a button
             btn_id = data[len("nav_") :]
             btn = get_button(db, btn_id)
             if not btn:
@@ -620,12 +615,10 @@ def callback(call):
                 return
 
             if get_children(db, btn_id):
-                # Has sub-buttons → navigate in place
                 bot.edit_message_text(
                     btn["name"], cid, mid, reply_markup=build_nav_markup(db, btn_id)
                 )
             else:
-                # Leaf → check password first (admin always bypasses)
                 password = btn.get("password", "").strip()
                 if password and uid != ADMIN_ID:
                     set_state(uid, WAIT_PASSWORD_INPUT, btn_id=btn_id)
@@ -637,15 +630,18 @@ def callback(call):
                     send_content(cid, btn, back_only_markup(btn))
             return
 
-        # ── Daily Gift ─────────────────────────────────────────────────────
         if data == "gift_claim":
+            db = load_db()
+            if not db.get("gift_active", True):
+                bot.send_message(cid, "⚠️ خدمة الهدية اليومية متوقفة مؤقتاً من قبل الإدارة.")
+                return
             success, msg = claim_daily_gift(uid)
             bot.send_message(cid, msg)
             return
 
-        # ── Subscription check ─────────────────────────────────────────────
         if data == "sub_check":
-            if not REQUIRED_CHANNELS:
+            db = load_db()
+            if not db.get("sub_active", True) or not REQUIRED_CHANNELS:
                 bot.send_message(cid, "✅ لا توجد قنوات مطلوبة حالياً.")
                 return
             missing = check_subscription(uid)
@@ -663,7 +659,6 @@ def callback(call):
                     reply_markup=markup,
                 )
             else:
-                db = load_db()
                 if get_children(db, None):
                     bot.send_message(
                         cid,
@@ -674,11 +669,9 @@ def callback(call):
                     bot.send_message(cid, "✅ تم التحقق! أهلاً بك! القائمة فارغة حالياً.")
             return
 
-        # ── Admin only below ───────────────────────────────────────────────
         if uid != ADMIN_ID:
             return
 
-        # ── Add button ─────────────────────────────────────────────────────
         if data == "adm_add":
             markup = types.InlineKeyboardMarkup()
             markup.add(
@@ -725,7 +718,6 @@ def callback(call):
                 cid, f"📝 أرسل اسم الزر الفرعي تحت «{parent['name']}»:\n/cancel للإلغاء"
             )
 
-        # ── Set / change password on existing button ───────────────────────
         elif data == "adm_setpw":
             db = load_db()
             leaves = [b for b in db["buttons"] if not get_children(db, b["id"]) ]
@@ -734,7 +726,6 @@ def callback(call):
                 return
             markup = types.InlineKeyboardMarkup()
             for btn in leaves:
-                # Hide actual password in the list label; show only lock icon
                 pw_hint = " 🔒" if btn.get("password") else " 🔓"
                 p = get_button(db, btn["parent_id"]) if btn.get("parent_id") else None
                 path = f"  ← {p['name']}" if p else ""
@@ -769,7 +760,6 @@ def callback(call):
                 + f"أرسل كلمة المرور الجديدة، أو أرسل 0 لإزالة الحماية:\n/cancel للإلغاء",
             )
 
-        # ── Delete button ──────────────────────────────────────────────────
         elif data == "adm_delete":
             db = load_db()
             if not db["buttons"]:
@@ -808,7 +798,6 @@ def callback(call):
             extra = f" و{total} زر فرعي" if total else ""
             bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra}.")
 
-        # ── User management ────────────────────────────────────────────────
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup()
             markup.add(
@@ -853,7 +842,6 @@ def callback(call):
                 + "\n\nأرسل ID لرفع حظره:\n/cancel للإلغاء",
             )
 
-        # ── Broadcast ──────────────────────────────────────────────────────
         elif data == "adm_broadcast":
             db = load_db()
             set_state(uid, WAIT_BROADCAST)
@@ -867,11 +855,6 @@ def callback(call):
         report_admin_error(e, "callback")
 
 
-# ═══════════════════════════════════════════════════════════════
-#  UNIFIED MESSAGE HANDLER (state machine)
-# ═══════════════════════════════════════════════════════════════
-
-
 @bot.message_handler(
     content_types=["text", "photo", "document", "video", "audio", "voice", "sticker"],
     func=lambda m: not (m.content_type == "text" and m.text and m.text.startswith("/")),
@@ -881,7 +864,6 @@ def handle_state(message):
     cid = message.chat.id
     state = get_state(uid)
 
-    # ── No active state → forward to admin ────────────────────────────────
     if state is None:
         if uid != ADMIN_ID:
             try:
@@ -890,13 +872,10 @@ def handle_state(message):
                 logger.exception("Failed to forward message to admin")
         return
 
-    # ── /cancel check (text only) ──────────────────────────────────────────
     if message.content_type == "text" and message.text.strip().startswith("/cancel"):
         clear_state(uid)
         bot.send_message(cid, "❌ تم الإلغاء.")
         return
-
-    # ── Route by state ─────────────────────────────────────────────────────
 
     if state == WAIT_BTN_NAME:
         if message.content_type != "text":
@@ -917,7 +896,6 @@ def handle_state(message):
         parent_id = d.get("parent_id")
         btn_name = d.get("btn_name", "زر")
         ct, content = extract_content(message)
-        # Transition to password step — keep all collected data
         set_state(
             uid,
             WAIT_BTN_PASSWORD,
@@ -935,7 +913,6 @@ def handle_state(message):
         )
 
     elif state == WAIT_BTN_PASSWORD:
-        # Admin setting optional password after uploading content
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل كلمة المرور كنص، أو أرسل 0 للتخطي.")
             return
@@ -973,7 +950,6 @@ def handle_state(message):
         )
 
     elif state == WAIT_SET_PW_PICK:
-        # Admin changing password on an existing button
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل كلمة المرور كنص، أو أرسل 0 لإزالة الحماية.")
             return
@@ -999,7 +975,6 @@ def handle_state(message):
             )
 
     elif state == WAIT_PASSWORD_INPUT:
-        # User entering password for a locked button
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل كلمة المرور كنص.")
             return
@@ -1070,17 +1045,14 @@ def handle_state(message):
         bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
 
 
-# دالة استقبال التعديل الجديد (أضفها في نهاية الملف)
 def update_json_setting(btn_id, key, new_value):
     db = load_db()
     for btn in db["buttons"]:
         if btn["id"] == btn_id:
-            # تحديث القيمة في قاموس الإعدادات
             btn["settings"][key] = new_value
             break
     save_db(db)
 
-# دالة التعامل مع ضغط زر الإعداد (أضفها مع دوال الـ callback)
 @bot.callback_query_handler(func=lambda call: call.data.startswith("change_"))
 def handle_change_setting(call):
     btn_id = call.data.split("_")[1]
@@ -1107,18 +1079,8 @@ def save_new_gift_name(message):
     new_name = message.text.strip()
     db = load_db()
     db["gift_name"] = new_name
-    
-    if "main_buttons" in db:
-        for btn in db["main_buttons"]:
-            if btn.get("callback") == "gift_daily" or "هدية" in btn.get("text", ""):
-                btn["text"] = f"🎁 {new_name}"
-    if "buttons" in db:
-        for btn in db["buttons"]:
-            if btn.get("callback_data") == "gift_daily" or "هدية" in btn.get("text", ""):
-                btn["text"] = f"🎁 {new_name}"
-                
     save_db(db)
-    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الهدية إلى: {new_name} وتم تحديثها في القائمة الرئيسية.")
+    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الهدية إلى: {new_name}")
 
 def save_new_sub_name(message):
     new_name = message.text.strip()
@@ -1129,25 +1091,31 @@ def save_new_sub_name(message):
 
 def process_add_channel(message):
     ch = message.text.strip()
+    if not ch.startswith("@"):
+        bot.send_message(message.chat.id, "❌ خطأ: يجب أن تبدأ القناة بعلامة @ (مثال: @ChannelName).")
+        return
+        
     db = load_db()
     if "sub_channels" not in db:
-        db["sub_channels"] = []
+        db["sub_channels"] = REQUIRED_CHANNELS.copy()
     if ch not in db["sub_channels"]:
         db["sub_channels"].append(ch)
         save_db(db)
-        bot.send_message(message.chat.id, f"✅ تمت إضافة القناة ({ch}) بنجاح للاشتراك الإجباري.")
+        bot.send_message(message.chat.id, f"✅ تمت إضافة وقبول القناة ({ch}) بنجاح للاشتراك الإجباري.")
     else:
         bot.send_message(message.chat.id, f"⚠️ هذه القناة موجودة مسبقاً في القائمة.")
 
 def process_remove_channel(message):
     ch = message.text.strip()
     db = load_db()
-    if "sub_channels" in db and ch in db["sub_channels"]:
-        db["sub_channels"].remove(ch)
+    channels = db.get("sub_channels", REQUIRED_CHANNELS)
+    if ch in channels:
+        channels.remove(ch)
+        db["sub_channels"] = channels
         save_db(db)
         bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
     else:
-        bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة.")
+        bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة الحالية.")
 
 
 # ═══════════════════════════════════════════════════════════════
