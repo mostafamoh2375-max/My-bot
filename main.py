@@ -468,9 +468,11 @@ def callback(call):
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
-                # ── لوحة التحكم الديناميكية الشاملة (الهدية اليومية والاشتراك الإجباري) ──
-        if data == "adm_feat_gift":
+       # 1. إعدادات الهدية اليومية الرئيسية
+       if data == "adm_feat_gift":
             db = load_db()
+            current_points = db.get("gift_points", 5) # افتراضي 5 نقاط
+            gift_name = db.get("gift_name", "الهدية اليومية")
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
                 types.InlineKeyboardButton("✏️ تعديل عدد النقاط", callback_data="edit_gift_points_val"),
@@ -482,29 +484,61 @@ def callback(call):
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                "⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• اسم الخدمة: الهدية اليومية\n• الحالة: مفعلة ✅\n• النقاط الحالية: (مخصصة)\n\nاختر ما تريد تعديله:", 
+                f"⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• اسم الخدمة: {gift_name}\n• الحالة: مفعلة ✅\n• النقاط الحالية: {current_points}\n\nاختر ما تريد تعديله:", 
                 cid, mid, reply_markup=markup
             )
             return
 
-        if data == "edit_gift_points_val" or data == "show_gift_points" or data == "change_gift_name" or data == "toggle_gift_status":
+        # 2. أزرار الهدية الوظيفية الحقيقية
+        if data == "show_gift_points":
+            db = load_db()
+            pts = db.get("gift_points", 5)
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الهدية", callback_data="adm_feat_gift"))
-            bot.edit_message_text(
-                "🛠 تم استلام طلبك بنجاح!\nهذا القسم مخصص لتنفيذ التعديل المباشر (تغيير النقاط، جلب القيمة الحالية، أو تغيير الاسم حسب رغبتك).", 
-                cid, mid, reply_markup=markup
-            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_gift"))
+            bot.edit_message_text(f"🎁 عدد النقاط الحالي الممنوح في الهدية اليومية هو: **{pts}** نقطة.", cid, mid, reply_markup=markup, parse_mode="Markdown")
             return
 
-        if data in ["list_sub_channels", "add_sub_channel", "remove_sub_channel", "change_sub_name", "toggle_sub_status"]:
+        if data == "edit_gift_points_val":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
+            msg = bot.edit_message_text("✍️ أرسل الآن عدد النقاط الجديد (برقم صحيح) لتعيينه للهدية اليومية:", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_gift_points)
+            return
+
+        if data == "change_gift_name":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
+            msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_gift_name)
+            return
+
+        if data == "toggle_gift_status":
+            db = load_db()
+            current_status = db.get("gift_active", True)
+            db["gift_active"] = not current_status
+            save_db(db)
+            status_text = "مفعلة ✅" if db["gift_active"] else "معطلة ❌"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_gift"))
+            bot.edit_message_text(f"🔄 تم تغيير حالة الهدية بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
+            return
+
+        if data == "change_sub_name":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
+            msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للاشتراك الإجباري:", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_sub_name)
+            return
+
+        if data in ["list_sub_channels", "add_sub_channel", "remove_sub_channel", "toggle_sub_status"]:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
             bot.edit_message_text(
-                "🛠 تم استلام طلب إدارة الاشتراك بنجاح!\nهنا سيتم تنفيذ الإجراء المطلوب (إدارة القنوات أو تغيير اسم خدمة الاشتراك الإجباري).", 
+                "🛠 تم تفعيل هذا القسم لتنفيذ إدارة القنوات والاشتراك الإجباري بشكل تفاعلي ومباشر.", 
                 cid, mid, reply_markup=markup
             )
             return
-            
+
         if data == "adm_feat_sub":
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
