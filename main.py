@@ -501,7 +501,7 @@ def callback(call):
         if data == "edit_gift_points_val":
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
-            msg = bot.edit_message_text("✍️ أرسل الآن عدد النقاط الجديد (برقم صحيح) لتعيينه للهدية اليومية:", cid, mid, reply_markup=markup)
+            msg = bot.edit_message_text("✍️ أرسل الآن عدد النقاط الجديد (برقم صحيح):", cid, mid, reply_markup=markup)
             bot.register_next_step_handler(msg, save_new_gift_points)
             return
 
@@ -510,6 +510,27 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
             msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", cid, mid, reply_markup=markup)
             bot.register_next_step_handler(msg, save_new_gift_name)
+            return
+
+        if data == "change_sub_name":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
+            msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للاشتراك الإجباري:", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_sub_name)
+            return
+
+        if data == "add_sub_channel":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
+            msg = bot.edit_message_text("➕ أرسل معرف القناة المراد إضافتها (مثال: @Channel):", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, process_add_channel)
+            return
+
+        if data == "remove_sub_channel":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
+            msg = bot.edit_message_text("🗑 أرسل معرف القناة المراد إزالتها:", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, process_remove_channel)
             return
 
         if data == "toggle_gift_status":
@@ -521,13 +542,6 @@ def callback(call):
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_gift"))
             bot.edit_message_text(f"🔄 تم تغيير حالة الهدية بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
-            return
-
-        if data == "change_sub_name":
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
-            msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للاشتراك الإجباري:", cid, mid, reply_markup=markup)
-            bot.register_next_step_handler(msg, save_new_sub_name)
             return
 
         if data in ["list_sub_channels", "add_sub_channel", "remove_sub_channel", "toggle_sub_status"]:
