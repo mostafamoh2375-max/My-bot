@@ -473,16 +473,38 @@ def callback(call):
             db = load_db()
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
-                types.InlineKeyboardButton("🔄 تغيير حالة الهدية", callback_data="toggle_gift_status"),
-                types.InlineKeyboardButton("🎁 تعديل النقاط", callback_data="edit_gift_points")
+                types.InlineKeyboardButton("✏️ تعديل عدد النقاط", callback_data="edit_gift_points_val"),
+                types.InlineKeyboardButton("👁 معرفة النقاط الحالية", callback_data="show_gift_points")
+            )
+            markup.add(
+                types.InlineKeyboardButton("📝 تغيير اسم الخدمة", callback_data="change_gift_name"),
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف الخدمة", callback_data="toggle_gift_status")
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                "⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• الحالة: مفعلة ✅\n• النقاط: (افتراضي)\n\nاختر إجراء التعديل:", 
+                "⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• اسم الخدمة: الهدية اليومية\n• الحالة: مفعلة ✅\n• النقاط الحالية: (مخصصة)\n\nاختر ما تريد تعديله:", 
                 cid, mid, reply_markup=markup
             )
             return
 
+        if data == "edit_gift_points_val" or data == "show_gift_points" or data == "change_gift_name" or data == "toggle_gift_status":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الهدية", callback_data="adm_feat_gift"))
+            bot.edit_message_text(
+                "🛠 تم استلام طلبك بنجاح!\nهذا القسم مخصص لتنفيذ التعديل المباشر (تغيير النقاط، جلب القيمة الحالية، أو تغيير الاسم حسب رغبتك).", 
+                cid, mid, reply_markup=markup
+            )
+            return
+
+        if data in ["list_sub_channels", "add_sub_channel", "remove_sub_channel", "change_sub_name", "toggle_sub_status"]:
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
+            bot.edit_message_text(
+                "🛠 تم استلام طلب إدارة الاشتراك بنجاح!\nهنا سيتم تنفيذ الإجراء المطلوب (إدارة القنوات أو تغيير اسم خدمة الاشتراك الإجباري).", 
+                cid, mid, reply_markup=markup
+            )
+            return
+            
         if data == "adm_feat_sub":
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
