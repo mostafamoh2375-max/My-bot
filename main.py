@@ -1095,20 +1095,30 @@ def finish_update(message, btn_id, key):
 
 def save_new_gift_points(message):
     try:
-        new_pts = int(message.text)
+        new_pts = int(message.text.strip())
         db = load_db()
         db["gift_points"] = new_pts
         save_db(db)
         bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الهدية اليومية بنجاح إلى: {new_pts} نقطة.")
     except ValueError:
-        bot.send_message(message.chat.id, "❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+        bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
 
 def save_new_gift_name(message):
     new_name = message.text.strip()
     db = load_db()
     db["gift_name"] = new_name
+    
+    if "main_buttons" in db:
+        for btn in db["main_buttons"]:
+            if btn.get("callback") == "gift_daily" or "هدية" in btn.get("text", ""):
+                btn["text"] = f"🎁 {new_name}"
+    if "buttons" in db:
+        for btn in db["buttons"]:
+            if btn.get("callback_data") == "gift_daily" or "هدية" in btn.get("text", ""):
+                btn["text"] = f"🎁 {new_name}"
+                
     save_db(db)
-    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الهدية إلى: {new_name}")
+    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الهدية إلى: {new_name} وتم تحديثها في القائمة الرئيسية.")
 
 def save_new_sub_name(message):
     new_name = message.text.strip()
@@ -1116,6 +1126,28 @@ def save_new_sub_name(message):
     db["sub_name"] = new_name
     save_db(db)
     bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الاشتراك الإجباري إلى: {new_name}")
+
+def process_add_channel(message):
+    ch = message.text.strip()
+    db = load_db()
+    if "sub_channels" not in db:
+        db["sub_channels"] = []
+    if ch not in db["sub_channels"]:
+        db["sub_channels"].append(ch)
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تمت إضافة القناة ({ch}) بنجاح للاشتراك الإجباري.")
+    else:
+        bot.send_message(message.chat.id, f"⚠️ هذه القناة موجودة مسبقاً في القائمة.")
+
+def process_remove_channel(message):
+    ch = message.text.strip()
+    db = load_db()
+    if "sub_channels" in db and ch in db["sub_channels"]:
+        db["sub_channels"].remove(ch)
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
+    else:
+        bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة.")
 
 
 # ═══════════════════════════════════════════════════════════════
