@@ -468,6 +468,19 @@ def callback(call):
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
+                # ── أزرار إدارة الهدية اليومية والاشتراك الإجباري (الحل القاطع) ──
+        if data == "adm_feat_gift":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+            bot.edit_message_text("⚙️ إعدادات الهدية اليومية:\nحالة الهدية: مفعلة ✅", cid, mid, reply_markup=markup)
+            return
+
+        if data == "adm_feat_sub":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+            bot.edit_message_text("🛡 إدارة الاشتراك الإجباري:\nحالة الاشتراك: مفعل ✅", cid, mid, reply_markup=markup)
+            return
+
                 # إضافة هذه الأسطر لربط الأزرار الجديدة
         if data == "adm_back_main":
             bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
@@ -987,25 +1000,6 @@ def handle_change_setting(call):
 def finish_update(message, btn_id, key):
     update_json_setting(btn_id, key, message.text)
     bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
-
-
-# معالج أزرار الهدية والاشتراك الإجباري الجديدة
-@bot.callback_query_handler(func=lambda call: call.data in ["adm_feat_gift", "adm_feat_sub"])
-def handle_gift_and_sub_features(call):
-    bot.answer_callback_query(call.id)  # ضع هذا السطر هنا في البداية تماماً
-    data = call.data
-    cid = call.message.chat.id
-    mid = call.message.message_id
-    
-    if data == "adm_feat_gift":
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-        bot.edit_message_text("⚙️ إعدادات الهدية اليومية:\nحالة الهدية: مفعلة ✅", cid, mid, reply_markup=markup)
-                             
-    elif data == "adm_feat_sub":
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-        bot.edit_message_text("🛡 إدارة الاشتراك الإجباري:\nحالة الاشتراك: مفعل ✅", cid, mid, reply_markup=markup)
 
 
 # ═══════════════════════════════════════════════════════════════
