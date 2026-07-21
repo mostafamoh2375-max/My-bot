@@ -469,7 +469,7 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
             # 1. إعدادات الهدية اليومية الرئيسية
-         if data == "adm_feat_gift":
+        if data == "adm_feat_gift":
             db = load_db()
             current_points = db.get("gift_points", 5) # افتراضي 5 نقاط
             gift_name = db.get("gift_name", "الهدية اليومية")
