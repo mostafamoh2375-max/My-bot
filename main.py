@@ -76,6 +76,7 @@ WAIT_PASSWORD_INPUT = "WAIT_PASSWORD_INPUT"
 WAIT_BROADCAST = "WAIT_BROADCAST"
 WAIT_BAN = "WAIT_BAN"
 WAIT_UNBAN = "WAIT_UNBAN"
+WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
 
 
 def set_state(uid, state, **data):
@@ -550,12 +551,13 @@ def callback(call):
             bot.register_next_step_handler(msg, save_new_gift_points)
             return
 
-        if data == "change_gift_name":
+                if data == "change_gift_name":
+            set_state(uid, WAIT_GIFT_NAME)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
             bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
-            bot.register_next_step_handler(call.message, save_new_gift_name)
             return
+
 
         if data == "change_sub_name":
             markup = types.InlineKeyboardMarkup()
@@ -1050,8 +1052,28 @@ def handle_state(message):
         else:
             bot.send_message(
                 cid, "❌ كلمة المرور خاطئة. حاول مرة أخرى أو أرسل /cancel للإلغاء."
-            )
-
+         )
+            
+    elif state == WAIT_GIFT_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل الاسم كنص من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        db["gift_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الهدية", callback_data="adm_feat_gift"))
+        bot.send_message(
+            cid, 
+            f"✅ **تم تغيير اسم خدمة الهدية بنجاح!**\n\n• الاسم الجديد: {new_name}", 
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+    
     elif state == WAIT_BAN:
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل ID المستخدم كرقم.")
