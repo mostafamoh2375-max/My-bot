@@ -551,7 +551,7 @@ def callback(call):
             bot.register_next_step_handler(msg, save_new_gift_points)
             return
             
-                if data == "change_gift_name":
+        if data == "change_gift_name":
             set_state(uid, WAIT_GIFT_NAME)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
