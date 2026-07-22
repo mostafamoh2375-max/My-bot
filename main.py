@@ -1149,20 +1149,81 @@ def save_new_sub_name(message):
     bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الاشتراك الإجباري إلى: {new_name}")
 
 def process_add_channel(message):
+    cid = message.chat.id
     ch = message.text.strip()
-    if not ch.startswith("@"):
-        bot.send_message(message.chat.id, "❌ خطأ: يجب أن تبدأ القناة بعلامة @ (مثال: @ChannelName).")
+    
+    # 1. التحقق من أن المدخل يبدأ بـ @ ومعرف صالح
+    if not ch.startswith("@") or len(ch) < 4:
+        bot.send_message(
+            cid, 
+            "❌ **خطأ:** معرف القناة غير صحيح!\n"
+            "يجب أن يبدأ المعرف بعلامة `@` وأن يكون معرف قناة حقيقي وليست رسالة عشوائية أو يوزر حساب شخصي."
+        , parse_mode="Markdown")
         return
         
-    db = load_db()
-    if "sub_channels" not in db:
-        db["sub_channels"] = REQUIRED_CHANNELS.copy()
-    if ch not in db["sub_channels"]:
-        db["sub_channels"].append(ch)
-        save_db(db)
-        bot.send_message(message.chat.id, f"✅ تمت إضافة وقبول القناة ({ch}) بنجاح للاشتراك الإجباري.")
-    else:
-        bot.send_message(message.chat.id, f"⚠️ هذه القناة موجودة مسبقاً في القائمة.")
+    try:
+        # 2. فحص حالة القناة وجودتها عبر تليجرام
+        chat_info = bot.get_chat(ch)
+        
+        # التأكد من أنها قناة وليست مجموعة أو دردشة شخصية
+        if chat_info.type != "channel":
+            bot.send_message(cid, "❌ **خطأ:** المعرف المُرسل ليس لقناة عامة في تيليجرام (تأكد أنه تخص قناة فقط).", parse_mode="Markdown")
+            return
+            
+        # 3. التحقق من أن البوت مشرف ولديه الصلاحيات المطلوبة
+        bot_member = bot.get_chat_member(ch, bot.get_me().id)
+        
+        if bot_member.status not in ('administrator', 'creator'):
+            bot.send_message(
+                cid, 
+                "❌ **خطأ الشروط:** البوت ليس مشرفاً في هذه القناة!\n"
+                "يجب عليك أولاً إضافة البوت مشرفاً في القناة لكي يتم قبولها.", 
+                parse_mode="Markdown"
+            )
+            return
+            
+        # التحقق من صلاحية إرسال الرسائل (صلاحية أساسية صارمة)
+        # ملاحظة: في حال كان البوت منشئ (creator) تكون كل الصلاحيات متاحة ضمناً
+        if bot_member.status == 'administrator':
+            can_post = getattr(bot_member, 'can_post_messages', True) # تتكفل بالتحقق من إرسال الرسائل
+            if not can_post:
+                bot.send_message(
+                    cid, 
+                    "❌ **خطأ الصلاحيات:** البوت لا يملك صلاحية (إرسال الرسائل) في القناة.\n"
+                    "يجب أن تمنح البوت 3 صلاحيات على الأقل وتكون صلاحية إرسال الرسائل مفعلة.", 
+                    parse_mode="Markdown"
+                )
+                return
+
+        # 4. إذا تجاوزت القناة كل الشروط بنجاح، يتم حفظها في قاعدة البيانات
+        db = load_db()
+        if "sub_channels" not in db:
+            db["sub_channels"] = REQUIRED_CHANNELS.copy()
+            
+        if ch not in db["sub_channels"]:
+            db["sub_channels"].append(ch)
+            save_db(db)
+            bot.send_message(
+                cid, 
+                f"✅ **تمت إضافة القناة بنجاح واجتازت كافة الشروط!**\n\n"
+                f"• اسم القناة: {chat_info.title}\n"
+                f"• المعرف: {ch}\n"
+                f"• البوت مشرف بصلاحيات كاملة.", 
+                parse_mode="Markdown"
+            )
+        else:
+            bot.send_message(cid, f"⚠️ هذه القناة (`{ch}`) مضافة مسبقاً في قائمة الاشتراك الإجباري لديك.", parse_mode="Markdown")
+            
+    except Exception as e:
+        # التقاط الأخطاء المخصصة في حال كان المعرف وهمياً أو غير موجود أو هناك خطأ بالوصول
+        logger.exception("Failed to add channel %s: %s", ch, e)
+        bot.send_message(
+            cid, 
+            "❌ **خطأ في التحقق من القناة!**\n"
+            "لم يتم العثور على القناة أو أن المعرف وهمي/خاطئ، أو أن البوت لم يتم إضافته بالشكل الصحيح كمشرف.\n"
+            "تأكد من صحة المعرف ووجود البوت مشرفاً فيها ثم حاول مجدداً.", 
+            parse_mode="Markdown"
+        )
 
 def process_remove_channel(message):
     ch = message.text.strip()
