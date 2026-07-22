@@ -552,15 +552,10 @@ def callback(call):
             return
             
         if data == "change_gift_name":
-            set_state(uid, WAIT_GIFT_NAME)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
-            bot.edit_message_text(
-                "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:\n/cancel للإلغاء",
-                cid,
-                mid,
-                reply_markup=markup
-            )
+            msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_gift_name)
             return
 
         if data == "change_sub_name":
@@ -1165,7 +1160,14 @@ def save_new_gift_name(message):
     db = load_db()
     db["gift_name"] = new_name
     save_db(db)
-    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الهدية إلى: {new_name}")
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الهدية", callback_data="adm_feat_gift"))
+    bot.send_message(
+        message.chat.id, 
+        f"✅ **تم تغيير اسم خدمة الهدية بنجاح!**\n\n• الاسم الجديد: {new_name}", 
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
 
 def save_new_sub_name(message):
     new_name = message.text.strip()
