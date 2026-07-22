@@ -552,12 +552,16 @@ def callback(call):
             return
             
         if data == "change_gift_name":
+            set_state(uid, WAIT_GIFT_NAME)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
-            # إرسال رسالة جديدة بدلاً من تعديل القديمة لتجنب تعليق الخطوات
-            bot.delete_message(cid, mid)
-            msg = bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
-            bot.register_next_step_handler(msg, save_new_gift_name)
+            # بدلاً من تعديل رسالة قديمة وتوليد خطأ، نقوم بحذف الرسالة القديمة ونرسل رسالة جديدة بالكامل
+            try:
+                bot.delete_message(cid, mid)
+            except:
+                pass
+                
+            bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
             return
 
         if data == "change_sub_name":
