@@ -414,21 +414,80 @@ def admin(message):
         reply_markup=admin_menu_markup(),
     )
 
-@bot.callback_query_handler(func=lambda call: call.data == "adm_settings_list")
-def list_buttons_for_settings(call):
-    db = load_db()
-    markup = types.InlineKeyboardMarkup()
-    for btn in db["buttons"]:
-        markup.add(types.InlineKeyboardButton(btn["name"], callback_data=f"adm_edit_{btn['id']}"))
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-    bot.edit_message_text("اختر الزر لتعديل إعداداته:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+# ── نظام إدارة وتعديل الأزرار والخدمات الديناميكي الشامل ──
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_edit_") or call.data.startswith("change_"))
+def handle_dynamic_admin_actions(call):
+    data = call.data
+    cid = call.message.chat.id
+    uid = call.from_user.id
+    
+    # 1. إذا كان الضغط للدخول إلى لوحة التحكم الخاصة بزر أو خدمة معينة
+    if data.startswith("adm_edit_"):
+        btn_id = data.replace("adm_edit_", "")
+        db = load_db()
+        btn = get_button(db, btn_id)
+        
+        if not btn:
+            bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود أو تم حذفه.", show_alert=True)
+            return
+            
+        btn_name = btn.get('name', 'بدون اسم')
+        
+        # بناء لوحة تحكم ديناميكية كاملة للتحكم في خصائص الخدمة أو الزر (تعديل الاسم، المحتوى، النقاط، أو الحذف)
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("📝 تعديل الاسم", callback_data=f"change_{btn_id}_name"),
+            types.InlineKeyboardButton("📄 تعديل المحتوى/الوصف", callback_data=f"change_{btn_id}_content")
+        )
+        markup.add(
+            types.InlineKeyboardButton("💎 تعديل النقاط/الإعدادات", callback_data=f"change_{btn_id}_points"),
+            types.InlineKeyboardButton("🗑️ حذف الخدمة/الزر", callback_data=f"delete_btn_{btn_id}")
+        )
+        markup.add(types.InlineKeyboardButton("🔙 عودة لقائمة الخدمات", callback_data="admin_buttons_list"))
+        
+        bot.edit_message_text(
+            f"⚙️ **لوحة التحكم الخاصة بـ:** «{btn_name}»\n\n"
+            f"من هنا يمكنك التحكم الكامل بالخدمة (تعديل، تغيير، حذف، أو تحرير كافة محتوياتها):",
+            cid,
+            call.message.message_id,
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_edit_"))
-def edit_btn_settings(call):
-    btn_id = call.data.split("_")[2]
-    db = load_db()
-    btn = get_button(db, btn_id)
-    if not btn: return
+    # 2. إذا كان الضغط لتغيير خاصية معينة (اسم، محتوى، نقاط... إلخ)
+    elif data.startswith("change_"):
+        parts = data.split("_")
+        if len(parts) >= 3:
+            btn_id = parts[1]
+            key = parts[2]
+            
+            # حفظ الحالة لمدخلات المستخدم القادمة
+            set_state(uid, "WAIT_DYNAMIC_BTN_EDIT", btn_id=btn_id, edit_key=key)
+            
+            db = load_db()
+            btn = get_button(db, btn_id)
+            btn_name = btn.get('name', 'الخدمة') if btn else 'الخدمة'
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data=f"adm_edit_{btn_id}"))
+            
+            key_translations = {
+                "name": "الاسم الجديد",
+                "content": "المحتوى أو الوصف الجديد",
+                "points": "النقاط أو الإعدادات الجديدة"
+            }
+            readable_key = key_translations.get(key, key)
+            
+            bot.edit_message_text(
+                f"✍️ أنت الآن تقوم بـ **تعديل ({readable_key})** للخدمة/الزر: «{btn_name}».\n\n"
+                f"أرسل القيمة الجديدة الآن في رسالة وسيقوم البوت بتحديثها وحفظها فوراً:",
+                cid,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+            bot.answer_callback_query(call.id)
     
     if "settings" not in btn:
         btn["settings"] = {"points": "0", "status": "on"}
