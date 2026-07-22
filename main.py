@@ -607,7 +607,7 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
             if channels:
                 ch_list = "\n".join([f"• {ch}" for ch in channels])
-                bot.edit_message_text(f"📋 القنوات المضافة حالياً للاشتراك الإجباري:\n\n{ch_list}", cid, mid, reply_markup=markup, parse_mode="Markdown")
+                bot.edit_message_text(f"📋 القنوات المضافة حالياً للاشتراك الإجباري:\n\n{ch_list}", cid, mid, reply_markup=markup)
             else:
                 bot.edit_message_text("📋 لا توجد أي قنوات مضافة حالياً للاشتراك الإجباري.", cid, mid, reply_markup=markup)
             return
@@ -1150,50 +1150,67 @@ def save_new_sub_name(message):
 
 def process_add_channel(message):
     cid = message.chat.id
-    ch = message.text.strip()
+    raw_text = message.text.strip()
     
-    # 1. التحقق من أن المدخل يبدأ بـ @ ومعرف صالح
-    if not ch.startswith("@") or len(ch) < 4:
-        bot.send_message(
-            cid, 
-            "❌ **خطأ:** معرف القناة غير صحيح!\n"
-            "يجب أن يبدأ المعرف بعلامة `@` وأن يكون معرف قناة حقيقي وليست رسالة عشوائية أو يوزر حساب شخصي."
-        , parse_mode="Markdown")
+    # تنظيف المدخل سواء كان رابط تليجرام أو معرف مباشر
+    ch = raw_text
+    if "t.me/" in ch:
+        ch = "@" + ch.split("t.me/")[-1].split("/")[0].strip()
+    elif not ch.startswith("@"):
+        ch = "@" + ch
+        
+    # التحقق من أن المعرف صالح
+    if len(ch) < 4:
+        bot.send_message(cid, "❌ خطأ: معرف القناة قصير جداً أو غير صالح.")
         return
         
     try:
-        # 2. فحص حالة القناة وجودتها عبر تليجرام
+        # فحص القناة عبر التيليجرام
         chat_info = bot.get_chat(ch)
         
-        # التأكد من أنها قناة وليست مجموعة أو دردشة شخصية
         if chat_info.type != "channel":
-            bot.send_message(cid, "❌ **خطأ:** المعرف المُرسل ليس لقناة عامة في تيليجرام (تأكد أنه تخص قناة فقط).", parse_mode="Markdown")
+            bot.send_message(cid, "❌ خطأ: المعرف المُرسل ليس لقناة عامة في تيليجرام.")
             return
             
-        # 3. التحقق من أن البوت مشرف ولديه الصلاحيات المطلوبة
+        # التحقق من إشراف البوت والصلاحيات
         bot_member = bot.get_chat_member(ch, bot.get_me().id)
-        
         if bot_member.status not in ('administrator', 'creator'):
-            bot.send_message(
-                cid, 
-                "❌ **خطأ الشروط:** البوت ليس مشرفاً في هذه القناة!\n"
-                "يجب عليك أولاً إضافة البوت مشرفاً في القناة لكي يتم قبولها.", 
-                parse_mode="Markdown"
-            )
+            bot.send_message(cid, "❌ خطأ الشروط: البوت ليس مشرفاً في هذه القناة! أضفه مشرفاً أولاً.")
             return
             
-        # التحقق من صلاحية إرسال الرسائل (صلاحية أساسية صارمة)
-        # ملاحظة: في حال كان البوت منشئ (creator) تكون كل الصلاحيات متاحة ضمناً
         if bot_member.status == 'administrator':
-            can_post = getattr(bot_member, 'can_post_messages', True) # تتكفل بالتحقق من إرسال الرسائل
+            can_post = getattr(bot_member, 'can_post_messages', True)
             if not can_post:
-                bot.send_message(
-                    cid, 
-                    "❌ **خطأ الصلاحيات:** البوت لا يملك صلاحية (إرسال الرسائل) في القناة.\n"
-                    "يجب أن تمنح البوت 3 صلاحيات على الأقل وتكون صلاحية إرسال الرسائل مفعلة.", 
-                    parse_mode="Markdown"
-                )
+                bot.send_message(cid, "❌ خطأ: البوت لا يملك صلاحية إرسال الرسائل في هذه القناة.")
                 return
+
+        # حفظ القناة في قاعدة البيانات مع مراعاة توحيد الصيغة لمنع التكرار
+        db = load_db()
+        if "sub_channels" not in db:
+            db["sub_channels"] = REQUIRED_CHANNELS.copy()
+            
+        # التحقق غير الحساس لحالة الأحرف لمنع أي تكرار أو تداخل
+        existing_channels = db["sub_channels"]
+        if any(c.lower() == ch.lower() for c in existing_channels):
+            bot.send_message(cid, f"⚠️ هذه القناة ({ch}) مضافة مسبقاً في القائمة.")
+            return
+            
+        db["sub_channels"].append(ch)
+        save_db(db)
+        bot.send_message(
+            cid, 
+            f"✅ تمت إضافة القناة بنجاح واجتازت كافة الشروط!\n\n"
+            f"• اسم القناة: {chat_info.title}\n"
+            f"• المعرف: {ch}"
+        )
+            
+    except Exception as e:
+        logger.exception("Failed to add channel %s: %s", ch, e)
+        bot.send_message(
+            cid, 
+            "❌ خطأ في التحقق من القناة!\n"
+            "تأكد من صحة الرابط أو المعرف، وأن البوت مضاف كمشرف فيها."
+        )
 
         # 4. إذا تجاوزت القناة كل الشروط بنجاح، يتم حفظها في قاعدة البيانات
         db = load_db()
