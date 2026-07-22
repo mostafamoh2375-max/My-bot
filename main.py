@@ -551,7 +551,7 @@ def callback(call):
             bot.register_next_step_handler(msg, save_new_gift_points)
             return
             
-         if data == "change_gift_name":
+        if data == "change_gift_name":
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
             # إرسال رسالة جديدة بدلاً من تعديل القديمة لتجنب تعليق الخطوات
@@ -559,7 +559,6 @@ def callback(call):
             msg = bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
             bot.register_next_step_handler(msg, save_new_gift_name)
             return
-
 
         if data == "change_sub_name":
             markup = types.InlineKeyboardMarkup()
