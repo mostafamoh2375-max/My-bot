@@ -1350,4 +1350,4 @@ while True:
             bot.send_message(ADMIN_ID, f"⚠️ Bot polling crashed: {type(e).__name__}: {str(e)[:300]}")
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
-        time.
+         time.sleep(5)
