@@ -308,18 +308,24 @@ def send_content(cid, btn, back_markup):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  NAVIGATION MARKUP
+#  NAVIGATION MARKUP (عرض الأزرار في جهتين / عمودين)
 # ═══════════════════════════════════════════════════════════════
 
 def build_nav_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
-    for btn in children:
-        is_locked = int(btn.get("unlock_points", 0)) > 0
-        lock_icon = " 🔒" if is_locked else ""
-        markup.add(
-            types.InlineKeyboardButton(f"{btn['name']}{lock_icon}", callback_data=f"nav_{btn['id']}")
-        )
+    
+    # تقسيم الأزرار في صفوف ثنائية (جهتين بجانب بعضهما)
+    for i in range(0, len(children), 2):
+        row_buttons = []
+        for btn in children[i:i+2]:
+            is_locked = int(btn.get("unlock_points", 0)) > 0
+            lock_icon = " 🔒" if is_locked else ""
+            row_buttons.append(
+                types.InlineKeyboardButton(f"{btn['name']}{lock_icon}", callback_data=f"nav_{btn['id']}")
+            )
+        markup.row(*row_buttons)
+
     if parent_id is not None:
         parent = get_button(db, parent_id)
         back_to = parent.get("parent_id") if parent else None
@@ -349,20 +355,26 @@ def back_only_markup(btn):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR
+#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR (عرض في جهتين أيضاً)
 # ═══════════════════════════════════════════════════════════════
 
 def build_admin_settings_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
-    for btn in children:
-        has_sub = len(get_children(db, btn["id"])) > 0
-        icon = "📁" if has_sub else "📄"
-        is_locked = int(btn.get("unlock_points", 0)) > 0
-        lock_icon = " 🔒" if is_locked else ""
-        markup.add(
-            types.InlineKeyboardButton(f"{icon} {btn['name']}{lock_icon}", callback_data=f"adm_set_click_{btn['id']}")
-        )
+    
+    # تقسيم الأزرار في صفوف ثنائية (جهتين)
+    for i in range(0, len(children), 2):
+        row_buttons = []
+        for btn in children[i:i+2]:
+            has_sub = len(get_children(db, btn["id"])) > 0
+            icon = "📁" if has_sub else "📄"
+            is_locked = int(btn.get("unlock_points", 0)) > 0
+            lock_icon = " 🔒" if is_locked else ""
+            row_buttons.append(
+                types.InlineKeyboardButton(f"{icon} {btn['name']}{lock_icon}", callback_data=f"adm_set_click_{btn['id']}")
+            )
+        markup.row(*row_buttons)
+
     if parent_id is not None:
         parent = get_button(db, parent_id)
         back_to = parent.get("parent_id") if parent else None
@@ -1408,4 +1420,3 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
-            
