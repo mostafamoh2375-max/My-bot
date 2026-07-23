@@ -936,10 +936,12 @@ def callback(call):
                 bot.send_message(cid, "⚠️ الزر الأب غير موجود.")
                 return
             set_state(uid, WAIT_BTN_NAME, parent_id=parent_id)
+            # تم إصلاح ترتيب معاملات التعديل هنا لتجنب خطأ chat not found
             bot.edit_message_text(
-                cid, 
                 f"📝 تم اختيار المكان بنجاح تحت: «{parent['name']}»\n\n"
                 f"أرسل الآن **اسم الزر الجديد**:\n/cancel للإلغاء",
+                cid,
+                mid,
                 parse_mode="Markdown"
             )
 
@@ -1397,7 +1399,7 @@ def handle_dynamic_btn_edit_input(message):
         f"• التعديل المحدث: {edit_key}\n"
         f"• القيمة الجديدة: {new_value}",
         reply_markup=markup,
-        parse_Mode="Markdown"
+        parse_mode="Markdown"
     )
 
 
