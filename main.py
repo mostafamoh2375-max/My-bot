@@ -526,7 +526,7 @@ def callback(call):
                 types.InlineKeyboardButton("👁 معرفة النقاط الحالية", callback_data="show_gift_points")
             )
             markup.add(
-                types.InlineKeyboardButton("📝 تغيير اسم الخدمة", callback_data="change_gift_name"),
+                types.InlineKeyboardButton("📝 تغيير اسم الخدمة", callback_data="edit_gift_name"),
                 types.InlineKeyboardButton("🔄 تفعيل/إيقاف الخدمة", callback_data="toggle_gift_status")
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
@@ -551,11 +551,11 @@ def callback(call):
             bot.register_next_step_handler(msg, save_new_gift_points)
             return
             
-        if data == "change_gift_name":
+        if data == "edit_gift_name":
             set_state(uid, WAIT_GIFT_NAME)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
-            # بدلاً من تعديل رسالة قديمة وتوليد خطأ، نقوم بحذف الرسالة القديمة ونرسل رسالة جديدة بالكامل
+            
             try:
                 bot.delete_message(cid, mid)
             except:
