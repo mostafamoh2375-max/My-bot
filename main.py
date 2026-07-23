@@ -936,7 +936,6 @@ def callback(call):
                 bot.send_message(cid, "⚠️ الزر الأب غير موجود.")
                 return
             set_state(uid, WAIT_BTN_NAME, parent_id=parent_id)
-            # تم إصلاح ترتيب معاملات التعديل هنا لتجنب خطأ chat not found
             bot.edit_message_text(
                 f"📝 تم اختيار المكان بنجاح تحت: «{parent['name']}»\n\n"
                 f"أرسل الآن **اسم الزر الجديد**:\n/cancel للإلغاء",
@@ -1221,6 +1220,51 @@ def handle_state(message):
         )
         return
     
+    elif state == "WAIT_DYNAMIC_BTN_EDIT":
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ عذراً، يجب إرسال القيمة الجديدة كنص.")
+            return
+            
+        state_data = get_data(uid)
+        btn_id = state_data.get("btn_id")
+        edit_key = state_data.get("edit_key")
+        new_value = message.text.strip()
+        
+        db = load_db()
+        btn = get_button(db, btn_id)
+        
+        if not btn:
+            bot.send_message(cid, "⚠️ هذا الزر أو الخدمة لم تعد موجودة.")
+            clear_state(uid)
+            return
+            
+        if edit_key == "name":
+            btn["name"] = new_value
+        elif edit_key == "content":
+            btn["content"] = new_value
+        elif edit_key == "points":
+            if "settings" not in btn:
+                btn["settings"] = {}
+            btn["settings"]["points"] = new_value
+        else:
+            btn[edit_key] = new_value
+            
+        save_db(db)
+        clear_state(uid)
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 العودة لقائمة إعدادات الخدمات", callback_data="adm_settings_list"))
+        
+        bot.send_message(
+            cid,
+            f"✅ **تم التعديل والحفظ بنجاح!**\n\n"
+            f"• العنصر: {btn.get('name')}\n"
+            f"• التعديل المحدث: {edit_key}\n"
+            f"• القيمة الجديدة: {new_value}",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+
     elif state == WAIT_BAN:
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل ID المستخدم كرقم.")
@@ -1348,60 +1392,6 @@ def process_remove_channel(message):
     else:
         bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة الحالية.")
 
-@bot.message_handler(func=lambda m: get_state(m.from_user.id) == "WAIT_DYNAMIC_BTN_EDIT")
-def handle_dynamic_btn_edit_input(message):
-    uid = message.from_user.id
-    cid = message.chat.id
-    
-    if message.content_type == "text" and message.text.strip().startswith("/cancel"):
-        clear_state(uid)
-        bot.send_message(cid, "❌ تم إلغاء التعديل.")
-        return
-        
-    if message.content_type != "text":
-        bot.send_message(cid, "⚠️ عذراً، يجب إرسال القيمة الجديدة كنص.")
-        return
-        
-    state_data = get_data(uid)
-    btn_id = state_data.get("btn_id")
-    edit_key = state_data.get("edit_key")
-    new_value = message.text.strip()
-    
-    db = load_db()
-    btn = get_button(db, btn_id)
-    
-    if not btn:
-        bot.send_message(cid, "⚠️ هذا الزر أو الخدمة لم تعد موجودة.")
-        clear_state(uid)
-        return
-        
-    if edit_key == "name":
-        btn["name"] = new_value
-    elif edit_key == "content":
-        btn["content"] = new_value
-    elif edit_key == "points":
-        if "settings" not in btn:
-            btn["settings"] = {}
-        btn["settings"]["points"] = new_value
-    else:
-        btn[edit_key] = new_value
-        
-    save_db(db)
-    clear_state(uid)
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 العودة لقائمة إعدادات الخدمات", callback_data="adm_settings_list"))
-    
-    bot.send_message(
-        cid,
-        f"✅ **تم التعديل والحفظ بنجاح!**\n\n"
-        f"• العنصر: {btn.get('name')}\n"
-        f"• التعديل المحدث: {edit_key}\n"
-        f"• القيمة الجديدة: {new_value}",
-        reply_markup=markup,
-        parse_mode="Markdown"
-    )
-
 
 # ═══════════════════════════════════════════════════════════════
 #  RUN
@@ -1418,3 +1408,4 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
+            
