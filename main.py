@@ -316,6 +316,7 @@ def build_nav_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     for btn in children:
+        # إضافة رمز القفل إذا كان الزر مقفولاً بنقاط
         is_locked = int(btn.get("unlock_points", 0)) > 0
         lock_icon = " 🔒" if is_locked else ""
         markup.add(
@@ -633,6 +634,7 @@ def callback(call):
             return
             
         if data == "adm_settings_list":
+            # list_buttons_for_settings(call)  # Needs actual definition if used outside snippet
             pass
             return
 
@@ -654,6 +656,7 @@ def callback(call):
                 bot.answer_callback_query(call.id, f"❌ رصيد نقاطك غير كافٍ!\nتحتاج إلى {unlock_pts} نقطة لفتح هذه الخدمة.", show_alert=True)
                 return
                 
+            # خصم النقاط وحفظ الخدمة كمفتوحة للمستخدم
             user["points"] -= unlock_pts
             if "unlocked" not in user:
                 user["unlocked"] = []
@@ -709,9 +712,11 @@ def callback(call):
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
                 
+                # تخطي الإدارة (صاحب البوت يفتح مباشرة)
                 if uid == ADMIN_ID:
                     send_content(cid, btn, back_only_markup(btn))
                 
+                # للمستخدم العادي: التحقق من نظام القفل بالنقاط
                 elif unlock_pts > 0:
                     users_db = load_users()
                     uid_str = str(uid)
@@ -719,8 +724,10 @@ def callback(call):
                     user_unlocked = user_data_db.get("unlocked", [])
                     
                     if btn_id in user_unlocked:
+                        # المستخدم قد دفع مسبقاً، افتح له فوراً
                         send_content(cid, btn, back_only_markup(btn))
                     else:
+                        # عرض واجهة الدفع مع الوصف
                         desc = btn.get("unlock_desc", "هذا المحتوى حصري ومقفول.")
                         markup = types.InlineKeyboardMarkup()
                         markup.add(types.InlineKeyboardButton(f"🔓 فتح الخدمة بـ {unlock_pts} نقطة", callback_data=f"pay_{btn_id}"))
@@ -736,6 +743,7 @@ def callback(call):
                         else:
                             bot.edit_message_text(payment_text, cid, mid, reply_markup=markup, parse_mode="Markdown")
                 else:
+                    # زر مجاني، يتم فتحه مباشرة
                     send_content(cid, btn, back_only_markup(btn))
             return
 
@@ -828,16 +836,13 @@ def callback(call):
                 cid, f"📝 أرسل اسم الزر الفرعي تحت «{parent['name']}»:\n/cancel للإلغاء"
             )
 
-        # ── نظام القفل بالنقاط المحدث (استثناء أزرار الواجهة الرئيسية) ──
+        # ── نظام القفل بالنقاط الجديد ──
         elif data == "adm_lock_menu":
             db = load_db()
-            # استخراج الأزرار النهائية التي ليس لها أبناء، بشرط ألا تكون في الواجهة الرئيسية (أي أن parent_id ليس فارغاً)
-            leaves = [b for b in db["buttons"] if not get_children(db, b["id"]) and b.get("parent_id") is not None]
-            
+            leaves = [b for b in db["buttons"] if not get_children(db, b["id"])]
             if not leaves:
-                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار فرعية داخل القوائم لقفلها بعد.\n(أزرار الواجهة الرئيسية مستثناة ولا يمكن قفلها).")
+                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار نهائية لقفلها بعد.")
                 return
-                
             markup = types.InlineKeyboardMarkup()
             for btn in leaves:
                 is_locked = int(btn.get("unlock_points", 0)) > 0
@@ -852,7 +857,7 @@ def callback(call):
                 )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                "اختر الخدمة/الزر الفرعي لتعيين أو إلغاء القفل بالنقاط:\n(ملاحظة: أزرار الواجهة الرئيسية غير متاح قفلها هنا)\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
+                "اختر الخدمة/الزر لتعيين أو إلغاء القفل بالنقاط:\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
                 cid, mid, reply_markup=markup,
             )
 
@@ -1043,6 +1048,7 @@ def handle_state(message):
             pts = int(message.text.strip())
             btn_id = get_data(uid).get("btn_id")
             if pts <= 0:
+                # إزالة القفل
                 db = load_db()
                 btn = get_button(db, btn_id)
                 btn["unlock_points"] = 0
