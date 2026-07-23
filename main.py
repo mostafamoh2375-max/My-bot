@@ -4,7 +4,6 @@ import json
 import uuid
 import time
 import logging
-import sqlite3
 from flask import Flask
 from threading import Thread
 
@@ -23,173 +22,9 @@ t.start()
 import telebot
 from telebot import types
 
-# ── SQLite Database Setup ──────────────────────────────────────
-DB_FILE = "bot_data.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS buttons (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            content_type TEXT,
-            content TEXT,
-            parent_id TEXT,
-            unlock_points INTEGER,
-            unlock_desc TEXT
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id TEXT PRIMARY KEY,
-            name TEXT,
-            points INTEGER,
-            last_gift REAL,
-            unlocked TEXT
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS banned (
-            user_id INTEGER PRIMARY KEY
-        )
-    ''')
-    
-    conn.commit()
-    
-    # Default settings
-    cursor.execute("SELECT value FROM settings WHERE key='gift_points'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_points', '2')")
-    cursor.execute("SELECT value FROM settings WHERE key='gift_name'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_name', 'الهدية اليومية')")
-    cursor.execute("SELECT value FROM settings WHERE key='gift_active'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_active', 'true')")
-    cursor.execute("SELECT value FROM settings WHERE key='sub_active'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_active', 'true')")
-    cursor.execute("SELECT value FROM settings WHERE key='sub_channels'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_channels', ?)", (json.dumps(["@Salemly_1", "@shr_llh"]),))
-        
-    conn.commit()
-    conn.close()
-
-init_db()
-
-def load_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT id, name, content_type, content, parent_id, unlock_points, unlock_desc FROM buttons")
-    rows = cursor.fetchall()
-    buttons = []
-    for r in rows:
-        buttons.append({
-            "id": r[0], "name": r[1], "content_type": r[2],
-            "content": r[3], "parent_id": r[4], "unlock_points": r[5], "unlock_desc": r[6]
-        })
-        
-    cursor.execute("SELECT user_id FROM users")
-    users = [int(r[0]) if r[0].isdigit() else r[0] for r in cursor.fetchall()]
-    
-    cursor.execute("SELECT user_id FROM banned")
-    banned_users = [int(r[0]) for r in cursor.fetchall()]
-    
-    cursor.execute("SELECT key, value FROM settings")
-    settings_dict = {r[0]: r[1] for r in cursor.fetchall()}
-    
-    conn.close()
-    
-    gift_points = int(settings_dict.get("gift_points", 2))
-    gift_name = settings_dict.get("gift_name", "الهدية اليومية")
-    gift_active = settings_dict.get("gift_active", "true") == "true"
-    sub_active = settings_dict.get("sub_active", "true") == "true"
-    
-    try:
-        sub_channels = json.loads(settings_dict.get("sub_channels", '["@Salemly_1", "@shr_llh"]'))
-    except:
-        sub_channels = ["@Salemly_1", "@shr_llh"]
-        
-    return {
-        "buttons": buttons, "users": users, "banned_users": banned_users,
-        "gift_points": gift_points, "gift_name": gift_name,
-        "gift_active": gift_active, "sub_active": sub_active, "sub_channels": sub_channels
-    }
-
-def save_db(data):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    cursor.execute("DELETE FROM buttons")
-    for b in data.get("buttons", []):
-        cursor.execute(
-            "INSERT OR REPLACE INTO buttons (id, name, content_type, content, parent_id, unlock_points, unlock_desc) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (b.get("id"), b.get("name"), b.get("content_type", "text"), b.get("content", ""), b.get("parent_id"), b.get("unlock_points", 0), b.get("unlock_desc", ""))
-        )
-        
-    cursor.execute("DELETE FROM banned")
-    for bu in data.get("banned_users", []):
-        cursor.execute("INSERT OR IGNORE INTO banned (user_id) VALUES (?)", (bu,))
-        
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_points', ?)", (str(data.get("gift_points", 2)),))
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_name', ?)", (str(data.get("gift_name", "الهدية اليومية")),))
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_active', ?)", ("true" if data.get("gift_active", True) else "false",))
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_active', ?)", ("true" if data.get("sub_active", True) else "false",))
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_channels', ?)", (json.dumps(data.get("sub_channels", ["@Salemly_1", "@shr_llh"])),))
-    
-    conn.commit()
-    conn.close()
-
-def load_users():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id, name, points, last_gift, unlocked FROM users")
-    rows = cursor.fetchall()
-    users_dict = {}
-    for r in rows:
-        uid = str(r[0])
-        try:
-            unlocked = json.loads(r[4]) if r[4] else []
-        except:
-            unlocked = []
-        users_dict[uid] = {
-            "name": r[1] or "",
-            "points": r[2] if r[2] is not None else 0,
-            "last_gift": r[3] if r[3] is not None else 0.0,
-            "unlocked": unlocked
-        }
-    conn.close()
-    return {"users": users_dict}
-
-def save_users(data):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    for uid, udata in data.get("users", {}).items():
-        cursor.execute(
-            "INSERT OR REPLACE INTO users (user_id, name, points, last_gift, unlocked) VALUES (?, ?, ?, ?, ?)",
-            (
-                str(uid),
-                udata.get("name", ""),
-                udata.get("points", 0),
-                udata.get("last_gift", 0.0),
-                json.dumps(udata.get("unlocked", []))
-            )
-        )
-    conn.commit()
-    conn.close()
+# Files for JSON storage
+DB_FILE = "buttons.json"
+USERS_FILE = "users.json"
 
 # Bot token (required)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
@@ -201,12 +36,16 @@ if not TOKEN:
 # Admin Telegram ID (integer)
 ADMIN_ID = 8097008430
 
+# Create bot instance
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
+# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+
 def report_admin_error(exc: Exception, context: str = ""):
+    """Log exception and attempt to notify the admin with a short traceback."""
     try:
         logger.exception("Unhandled exception in %s: %s", context, exc)
     except Exception:
@@ -219,14 +58,15 @@ def report_admin_error(exc: Exception, context: str = ""):
     except Exception:
         logger.exception("Failed to send error message to ADMIN_ID")
 
+# ── Force-subscribe channels ────────────────────────────────────
 REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
 # ═══════════════════════════════════════════════════════════════
 #  STATE MACHINE
 # ═══════════════════════════════════════════════════════════════
 
-user_states = {}
-user_data = {}
+user_states = {}  # uid → state string
+user_data = {}  # uid → dict of temporary data
 
 WAIT_BTN_NAME = "WAIT_BTN_NAME"
 WAIT_BTN_CONTENT = "WAIT_BTN_CONTENT"
@@ -237,25 +77,74 @@ WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
 
+
 def set_state(uid, state, **data):
     user_states[uid] = state
     user_data[uid] = data
+
 
 def clear_state(uid):
     user_states.pop(uid, None)
     user_data.pop(uid, None)
 
+
 def get_state(uid):
     return user_states.get(uid)
 
+
 def get_data(uid):
     return user_data.get(uid, {})
+
+
+# ═══════════════════════════════════════════════════════════════
+#  DATABASE
+# ═══════════════════════════════════════════════════════════════
+
+def load_db():
+    if not os.path.exists(DB_FILE):
+        default = {"buttons": [], "users": [], "banned_users": [], "gift_points": 2, "gift_name": "الهدية اليومية", "sub_active": True}
+        save_db(default)
+        return default
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.setdefault("buttons", [])
+    data.setdefault("users", [])
+    data.setdefault("banned_users", [])
+    data.setdefault("gift_points", 2)
+    data.setdefault("gift_name", "الهدية اليومية")
+    data.setdefault("sub_active", True)
+    return data
+
+
+def save_db(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def register_user(user_id):
     db = load_db()
     if user_id not in db["users"]:
         db["users"].append(user_id)
         save_db(db)
+
+
+# ── Points system (users.json) ──────────────────────────────────
+
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        default = {"users": {}}
+        save_users(default)
+        return default
+    with open(USERS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.setdefault("users", {})
+    return data
+
+
+def save_users(data):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def register_user_points(user_id, name=""):
     data = load_users()
@@ -277,6 +166,9 @@ def register_user_points(user_id, name=""):
         if changed:
             save_users(data)
 
+
+# ── Force-subscribe check ───────────────────────────────────────
+
 def check_subscription(user_id):
     db = load_db()
     if not db.get("sub_active", True):
@@ -294,7 +186,11 @@ def check_subscription(user_id):
             not_subscribed.append(channel)
     return not_subscribed
 
-GIFT_INTERVAL = 86400
+
+# ── Daily gift (Dynamic from DB) ────────────────────────────────
+
+GIFT_INTERVAL = 86400  # 24 hours in seconds
+
 
 def claim_daily_gift(user_id):
     users_data = load_users()
@@ -330,14 +226,17 @@ def claim_daily_gift(user_id):
         f"رصيدك الحالي: {user['points']} نقطة 🌟"
     )
 
+
 def get_button(db, btn_id):
     for btn in db["buttons"]:
         if btn.get("id") == btn_id:
             return btn
     return None
 
+
 def get_children(db, parent_id):
     return [b for b in db["buttons"] if b.get("parent_id") == parent_id]
+
 
 def collect_descendants(db, btn_id):
     result = set()
@@ -346,8 +245,14 @@ def collect_descendants(db, btn_id):
         result.update(collect_descendants(db, child["id"]))
     return result
 
+
 def new_id():
     return str(uuid.uuid4())[:8]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  CONTENT HELPERS
+# ═══════════════════════════════════════════════════════════════
 
 def extract_content(message):
     ct = message.content_type
@@ -367,6 +272,7 @@ def extract_content(message):
         return "sticker", message.sticker.file_id
     else:
         return "text", ""
+
 
 def send_content(cid, btn, back_markup):
     ct = btn.get("content_type", "text")
@@ -400,10 +306,16 @@ def send_content(cid, btn, back_markup):
     except Exception as e:
         report_admin_error(e, "send_content")
 
+
+# ═══════════════════════════════════════════════════════════════
+#  NAVIGATION MARKUP (عرض الأزرار في جهتين / عمودين)
+# ═══════════════════════════════════════════════════════════════
+
 def build_nav_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     
+    # تقسيم الأزرار في صفوف ثنائية (جهتين بجانب بعضهما)
     for i in range(0, len(children), 2):
         row_buttons = []
         for btn in children[i:i+2]:
@@ -430,6 +342,7 @@ def build_nav_markup(db, parent_id=None):
         )
     return markup
 
+
 def back_only_markup(btn):
     parent_id = btn.get("parent_id")
     markup = types.InlineKeyboardMarkup()
@@ -440,10 +353,16 @@ def back_only_markup(btn):
     )
     return markup
 
+
+# ═══════════════════════════════════════════════════════════════
+#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR (عرض في جهتين أيضاً)
+# ═══════════════════════════════════════════════════════════════
+
 def build_admin_settings_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     
+    # تقسيم الأزرار في صفوف ثنائية (جهتين)
     for i in range(0, len(children), 2):
         row_buttons = []
         for btn in children[i:i+2]:
@@ -466,8 +385,14 @@ def build_admin_settings_markup(db, parent_id=None):
         markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
     return markup
 
+
+# ═══════════════════════════════════════════════════════════════
+#  /start
+# ═══════════════════════════════════════════════════════════════
+
 @bot.message_handler(commands=["start"])
 def start(message):
+    logger.info("Bot received start command from %s", message.from_user.id)
     clear_state(message.from_user.id)
     register_user(message.from_user.id)
     u = message.from_user
@@ -503,6 +428,11 @@ def start(message):
             message.chat.id,
             "أهلاً بك! القائمة فارغة حالياً.\nتواصل مع الإدارة أو انتظر إضافة الخدمات.",
         )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  /admin
+# ═══════════════════════════════════════════════════════════════
 
 def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
@@ -596,6 +526,11 @@ def handle_dynamic_admin_actions(call):
             )
             bot.answer_callback_query(call.id)
 
+
+# ═══════════════════════════════════════════════════════════════
+#  CALLBACK HANDLER
+# ═══════════════════════════════════════════════════════════════
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     bot.answer_callback_query(call.id)  
@@ -605,6 +540,7 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
+        # ─── معالجة زر إعدادات الخدمات والأزرار الشامل ───
         if data == "adm_settings_list" or data == "admin_buttons_list":
             db = load_db()
             markup = build_admin_settings_markup(db, None)
@@ -792,6 +728,7 @@ def callback(call):
             bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
             return
 
+        # الدفع مقابل الأزرار المدفوعة
         if data.startswith("pay_"):
             btn_id = data[len("pay_"):]
             db = load_db()
@@ -843,7 +780,7 @@ def callback(call):
                     try:
                         bot.delete_message(cid, mid)
                     except Exception as e:
-                        logger.exception("Failed to delete media message")
+                        logger.exception("Failed to delete media message before navigating back")
                     bot.send_message(cid, text, reply_markup=nav_markup)
                 else:
                     bot.edit_message_text(text, cid, mid, reply_markup=nav_markup)
@@ -931,6 +868,7 @@ def callback(call):
                     bot.send_message(cid, "✅ تم التحقق! أهلاً بك! القائمة فارغة حالياً.")
             return
 
+        # ─── منطقة صلاحيات الإدارة ───
         if uid != ADMIN_ID:
             return
 
@@ -956,7 +894,7 @@ def callback(call):
             db = load_db()
             root_buttons = [b for b in db["buttons"] if b.get("parent_id") is None]
             if not root_buttons:
-                bot.send_message(cid, "⚠️ لا توجد أقسام رئيسية بعد. أضف زراً رئيسياً أولاً.")
+                bot.send_message(cid, "⚠️ لا توجد أقسام رئيسية (في الواجهة الرئيسية) بعد. أضف زراً رئيسياً أولاً.")
                 return
             markup = types.InlineKeyboardMarkup()
             for btn in root_buttons:
@@ -1023,7 +961,7 @@ def callback(call):
             leaves = [b for b in db["buttons"] if not get_children(db, b["id"]) and b.get("parent_id") is not None]
             
             if not leaves:
-                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار فرعية داخل القوائم لقفلها بعد.")
+                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار فرعية داخل القوائم لقفلها بعد.\n(أزرار الواجهة الرئيسية مستثناة ولا يمكن قفلها).")
                 return
                 
             markup = types.InlineKeyboardMarkup()
@@ -1040,7 +978,7 @@ def callback(call):
                 )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                "اختر الخدمة/الزر الفرعي لتعيين أو إلغاء القفل بالنقاط:\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
+                "اختر الخدمة/الزر الفرعي لتعيين أو إلغاء القفل بالنقاط:\n(ملاحظة: أزرار الواجهة الرئيسية غير متاح قفلها هنا)\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
                 cid, mid, reply_markup=markup,
             )
 
@@ -1060,7 +998,7 @@ def callback(call):
                 cid,
                 f"⚙️ إعدادات القفل للزر: «{btn['name']}»\n"
                 f"الحالة الحالية: {current_status}\n\n"
-                f"أرسل الآن **عدد النقاط** المطلوب لفتح هذه الخدمة (أرسل 0 لإلغاء القفل):\n/cancel للإلغاء",
+                f"أرسل الآن **عدد النقاط** المطلوب لفتح هذه الخدمة (أرسل 0 لإلغاء القفل وجعلها مجانية):\n/cancel للإلغاء",
                 parse_mode="Markdown"
             )
 
@@ -1093,7 +1031,9 @@ def callback(call):
             descendants = collect_descendants(db, btn_id)
             total = len(descendants)
             db["buttons"] = [
-                b for b in db["buttons"] if b["id"] not in descendants and b["id"] != btn_id
+                b
+                for b in db["buttons"]
+                if b["id"] not in descendants and b["id"] != btn_id
             ]
             save_db(db)
             extra = f" و{total} زر فرعي" if total else ""
@@ -1101,9 +1041,15 @@ def callback(call):
 
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("👁 عرض المستخدمين", callback_data="usr_view"))
-            markup.add(types.InlineKeyboardButton("🚫 حظر مستخدم", callback_data="usr_ban"))
-            markup.add(types.InlineKeyboardButton("✅ رفع الحظر", callback_data="usr_unban"))
+            markup.add(
+                types.InlineKeyboardButton("👁 عرض المستخدمين", callback_data="usr_view")
+            )
+            markup.add(
+                types.InlineKeyboardButton("🚫 حظر مستخدم", callback_data="usr_ban")
+            )
+            markup.add(
+                types.InlineKeyboardButton("✅ رفع الحظر", callback_data="usr_unban")
+            )
             bot.send_message(cid, "👥 إدارة المستخدمين:", reply_markup=markup)
 
         elif data == "usr_view":
@@ -1149,6 +1095,7 @@ def callback(call):
     except Exception as e:
         report_admin_error(e, "callback")
 
+
 @bot.message_handler(
     content_types=["text", "photo", "document", "video", "audio", "voice", "sticker"],
     func=lambda m: not (m.content_type == "text" and m.text and m.text.startswith("/")),
@@ -1163,7 +1110,7 @@ def handle_state(message):
             try:
                 bot.forward_message(ADMIN_ID, cid, message.message_id)
             except Exception as e:
-                logger.exception("Failed to forward message")
+                logger.exception("Failed to forward message to admin")
         return
 
     if message.content_type == "text" and message.text.strip().startswith("/cancel"):
@@ -1210,7 +1157,7 @@ def handle_state(message):
             cid,
             f"✅ تم حفظ الزر «{btn_name}» بنجاح في المكان المختار!\n"
             f"نوع المحتوى: {ct}\n\n"
-            f"💡 **تلميح:** لإدارة القفل والنقاط، انتقل إلى «لوحة التحكم» ➔ «قفل الخدمات بنقاط».",
+            f"💡 **تلميح:** إذا أردت قفل هذا الزر بنقاط، يمكنك الذهاب إلى «لوحة التحكم» ➔ «قفل الخدمات بنقاط».",
         )
 
     elif state == WAIT_LOCK_POINTS:
@@ -1227,12 +1174,13 @@ def handle_state(message):
                 btn["unlock_desc"] = ""
                 save_db(db)
                 clear_state(uid)
-                bot.send_message(cid, f"✅ تم إلغاء القفل عن الخدمة «{btn['name']}» وأصبحت مجانية.")
+                bot.send_message(cid, f"✅ تم إلغاء القفل عن الخدمة «{btn['name']}» وأصبحت مجانية للمستخدمين.")
             else:
                 set_state(uid, WAIT_LOCK_DESC, btn_id=btn_id, points=pts)
                 bot.send_message(
                     cid, 
-                    "✍️ ممتاز! أرسل الآن **الرسالة أو الوصف** الذي سيظهر للمستخدم قبل الدفع:\n/cancel للإلغاء"
+                    "✍️ ممتاز! أرسل الآن **الرسالة أو الوصف** الذي سيظهر للمستخدم قبل الدفع:\n"
+                    "(مثال: يحتوي هذا الزر على ملفات سرية وحصرية، قم بالدفع لفتحه...)"
                 )
         except ValueError:
             bot.send_message(cid, "❌ خطأ: يرجى إرسال رقم صحيح فقط.")
@@ -1257,7 +1205,10 @@ def handle_state(message):
         clear_state(uid)
         bot.send_message(
             cid, 
-            f"✅ **تم قفل الخدمة بنجاح!**\n\n• الخدمة: {btn['name']}\n• سعر الفتح: {pts} نقطة", 
+            f"✅ **تم قفل الخدمة بنجاح!**\n\n"
+            f"• الخدمة: {btn['name']}\n"
+            f"• سعر الفتح: {pts} نقطة\n"
+            f"• وصف الخدمة:\n{desc}", 
             parse_mode="Markdown"
         )
             
@@ -1295,7 +1246,7 @@ def handle_state(message):
         btn = get_button(db, btn_id)
         
         if not btn:
-            bot.send_message(cid, "⚠️ هذا الزر لم يعد موجوداً.")
+            bot.send_message(cid, "⚠️ هذا الزر أو الخدمة لم تعد موجودة.")
             clear_state(uid)
             return
             
@@ -1318,7 +1269,10 @@ def handle_state(message):
         
         bot.send_message(
             cid,
-            f"✅ **تم التعديل والحفظ بنجاح!**\n\n• العنصر: {btn.get('name')}",
+            f"✅ **تم التعديل والحفظ بنجاح!**\n\n"
+            f"• العنصر: {btn.get('name')}\n"
+            f"• التعديل المحدث: {edit_key}\n"
+            f"• القيمة الجديدة: {new_value}",
             reply_markup=markup,
             parse_mode="Markdown"
         )
@@ -1337,7 +1291,7 @@ def handle_state(message):
             else:
                 bot.send_message(cid, f"المستخدم {target_id} محظور مسبقاً.")
         except ValueError:
-            bot.send_message(cid, "⚠️ ID غير صحيح.")
+            bot.send_message(cid, "⚠️ ID غير صحيح، يجب أن يكون رقماً.")
         clear_state(uid)
 
     elif state == WAIT_UNBAN:
@@ -1352,9 +1306,9 @@ def handle_state(message):
                 save_db(db)
                 bot.send_message(cid, f"✅ تم رفع الحظر عن {target_id}.")
             else:
-                bot.send_message(cid, f"المستخدم ليس محظوراً.")
+                bot.send_message(cid, f"المستخدم {target_id} ليس محظوراً.")
         except ValueError:
-            bot.send_message(cid, "⚠️ ID غير صحيح.")
+            bot.send_message(cid, "⚠️ ID غير صحيح، يجب أن يكون رقماً.")
         clear_state(uid)
 
     elif state == WAIT_BROADCAST:
@@ -1369,10 +1323,11 @@ def handle_state(message):
                 bot.copy_message(target_uid, cid, message.message_id)
                 sent += 1
             except Exception as e:
-                logger.exception("Failed to send broadcast")
+                logger.exception("Failed to send broadcast message to %s", target_uid)
                 failed += 1
         clear_state(uid)
         bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
+
 
 def save_new_gift_points(message):
     try:
@@ -1380,50 +1335,61 @@ def save_new_gift_points(message):
         db = load_db()
         db["gift_points"] = new_pts
         save_db(db)
-        bot.send_message(message.chat.id, f"✅ تم تحديث نقاط الهدية اليومية إلى: {new_pts} نقطة.")
+        bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الهدية اليومية بنجاح إلى: {new_pts} نقطة.")
     except ValueError:
-        bot.send_message(message.chat.id, f"❌ خطأ: أرسل رقماً صحيحاً.")
+        bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
 
 def save_new_sub_name(message):
     new_name = message.text.strip()
     db = load_db()
     db["sub_name"] = new_name
     save_db(db)
-    bot.send_message(message.chat.id, f"✅ تم التحديث بنجاح.")
+    bot.send_message(message.chat.id, f"✅ تم تغيير اسم خدمة الاشتراك الإجباري إلى: {new_name}")
 
 def process_add_channel(message):
     cid = message.chat.id
     raw_text = message.text.strip()
+    
     ch = raw_text
     if "t.me/" in ch:
         ch = "@" + ch.split("t.me/")[-1].split("/")[0].strip()
     elif not ch.startswith("@"):
         ch = "@" + ch
         
+    if len(ch) < 4:
+        bot.send_message(cid, "❌ خطأ: معرف القناة قصير جداً أو غير صالح.")
+        return
+        
     try:
         chat_info = bot.get_chat(ch)
         if chat_info.type != "channel":
-            bot.send_message(cid, "❌ المعرف ليس لقناة عامة.")
+            bot.send_message(cid, "❌ خطأ: المعرف المُرسل ليس لقناة عامة في تيليجرام.")
             return
             
         bot_member = bot.get_chat_member(ch, bot.get_me().id)
         if bot_member.status not in ('administrator', 'creator'):
-            bot.send_message(cid, "❌ البوت ليس مشرفاً في هذه القناة!")
+            bot.send_message(cid, "❌ خطأ الشروط: البوت ليس مشرفاً في هذه القناة! أضفه مشرفاً أولاً.")
             return
             
         db = load_db()
         if "sub_channels" not in db:
             db["sub_channels"] = REQUIRED_CHANNELS.copy()
             
-        if any(c.lower() == ch.lower() for c in db["sub_channels"]):
-            bot.send_message(cid, f"⚠️ القناة ({ch}) مضافة مسبقاً.")
+        existing_channels = db["sub_channels"]
+        if any(c.lower() == ch.lower() for c in existing_channels):
+            bot.send_message(cid, f"⚠️ هذه القناة ({ch}) مضافة مسبقاً في القائمة.")
             return
             
         db["sub_channels"].append(ch)
         save_db(db)
-        bot.send_message(cid, f"✅ تمت إضافة القناة ({ch}) بنجاح!")
+        bot.send_message(
+            cid, 
+            f"✅ تمت إضافة القناة بنجاح واجتازت كافة الشروط!\n\n"
+            f"• اسم القناة: {chat_info.title}\n"
+            f"• المعرف: {ch}"
+        )
     except Exception as e:
-        logger.exception("Failed to add channel")
+        logger.exception("Failed to add channel %s: %s", ch, e)
         bot.send_message(cid, "❌ خطأ في التحقق من القناة! تأكد من صحة المعرف وأن البوت مشرف فيها.")
 
 def process_remove_channel(message):
@@ -1436,16 +1402,21 @@ def process_remove_channel(message):
         save_db(db)
         bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
     else:
-        bot.send_message(message.chat.id, f"❌ القناة غير موجودة في القائمة.")
+        bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة الحالية.")
 
-logger.info("Bot is starting (polling with SQLite)...")
+
+# ═══════════════════════════════════════════════════════════════
+#  RUN
+# ═══════════════════════════════════════════════════════════════
+
+logger.info("Bot is starting (polling)...")
 while True:
     try:
         bot.infinity_polling(timeout=60, long_polling_timeout=60)
     except Exception as e:
-        logger.exception("Polling crashed")
+        logger.exception("Polling crashed — will restart in 5s")
         try:
-            bot.send_message(ADMIN_ID, f"⚠️ Bot crashed: {type(e).__name__}")
+            bot.send_message(ADMIN_ID, f"⚠️ Bot polling crashed: {type(e).__name__}: {str(e)[:300]}")
         except Exception:
-            pass
-        time.sleep(5)
+            logger.exception("Failed to notify admin about polling crash")
+            time.sleep(5)
