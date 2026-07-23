@@ -65,6 +65,13 @@ def init_db():
         )
     ''')
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS referrals (
+            referred_id TEXT PRIMARY KEY,
+            referrer_id TEXT
+        )
+    ''')
+    
     conn.commit()
     
     # Default settings
@@ -77,6 +84,17 @@ def init_db():
     cursor.execute("SELECT value FROM settings WHERE key='gift_active'")
     if not cursor.fetchone():
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_active', 'true')")
+        
+    cursor.execute("SELECT value FROM settings WHERE key='referral_points'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_points', '5')")
+    cursor.execute("SELECT value FROM settings WHERE key='referral_active'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_active', 'true')")
+    cursor.execute("SELECT value FROM settings WHERE key='referral_name'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_name', 'رابط الإحالة')")
+
     cursor.execute("SELECT value FROM settings WHERE key='sub_active'")
     if not cursor.fetchone():
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_active', 'true')")
@@ -116,6 +134,11 @@ def load_db():
     gift_points = int(settings_dict.get("gift_points", 2))
     gift_name = settings_dict.get("gift_name", "الهدية اليومية")
     gift_active = settings_dict.get("gift_active", "true") == "true"
+    
+    referral_points = int(settings_dict.get("referral_points", 5))
+    referral_name = settings_dict.get("referral_name", "رابط الإحالة")
+    referral_active = settings_dict.get("referral_active", "true") == "true"
+    
     sub_active = settings_dict.get("sub_active", "true") == "true"
     
     try:
@@ -125,8 +148,9 @@ def load_db():
         
     return {
         "buttons": buttons, "users": users, "banned_users": banned_users,
-        "gift_points": gift_points, "gift_name": gift_name,
-        "gift_active": gift_active, "sub_active": sub_active, "sub_channels": sub_channels
+        "gift_points": gift_points, "gift_name": gift_name, "gift_active": gift_active,
+        "referral_points": referral_points, "referral_name": referral_name, "referral_active": referral_active,
+        "sub_active": sub_active, "sub_channels": sub_channels
     }
 
 def save_db(data):
@@ -147,6 +171,11 @@ def save_db(data):
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_points', ?)", (str(data.get("gift_points", 2)),))
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_name', ?)", (str(data.get("gift_name", "الهدية اليومية")),))
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gift_active', ?)", ("true" if data.get("gift_active", True) else "false",))
+    
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_points', ?)", (str(data.get("referral_points", 5)),))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_name', ?)", (str(data.get("referral_name", "رابط الإحالة")),))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_active', ?)", ("true" if data.get("referral_active", True) else "false",))
+    
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_active', ?)", ("true" if data.get("sub_active", True) else "false",))
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sub_channels', ?)", (json.dumps(data.get("sub_channels", ["@Salemly_1", "@shr_llh"])),))
     
@@ -191,14 +220,12 @@ def save_users(data):
     conn.commit()
     conn.close()
 
-# Bot token (required)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
 
 if not TOKEN:
     sys.stderr.write("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.\n")
     raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
 
-# Admin Telegram ID (integer)
 ADMIN_ID = 8097008430
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
@@ -219,11 +246,7 @@ def report_admin_error(exc: Exception, context: str = ""):
     except Exception:
         logger.exception("Failed to send error message to ADMIN_ID")
 
-REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
-
-# ═══════════════════════════════════════════════════════════════
-#  STATE MACHINE
-# ═══════════════════════════════════════════════════════════════
+ REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
 user_states = {}
 user_data = {}
@@ -234,6 +257,7 @@ WAIT_BROADCAST = "WAIT_BROADCAST"
 WAIT_BAN = "WAIT_BAN"
 WAIT_UNBAN = "WAIT_UNBAN"
 WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
+WAIT_REF_NAME = "WAIT_REF_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
 
@@ -319,7 +343,6 @@ def claim_daily_gift(user_id):
         )
         
     current_gift_points = db.get("gift_points", 2)
-    
     user["points"] = user.get("points", 0) + current_gift_points
     user["last_gift"] = now
     save_users(users_data)
@@ -425,8 +448,11 @@ def build_nav_markup(db, parent_id=None):
     else:
         db_data = load_db()
         gift_name = db_data.get("gift_name", "الهدية اليومية")
+        ref_name = db_data.get("referral_name", "رابط الإحالة")
+        
         markup.add(
-            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim")
+            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
+            types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_get")
         )
     return markup
 
@@ -471,8 +497,41 @@ def start(message):
     clear_state(message.from_user.id)
     register_user(message.from_user.id)
     u = message.from_user
+    uid_str = str(u.id)
     name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or ""
     register_user_points(u.id, name)
+
+    # Referral system handling
+    text_parts = message.text.split()
+    if len(text_parts) > 1:
+        ref_arg = text_parts[1]
+        if ref_arg.isdigit() and int(ref_arg) != u.id:
+            referrer_id_str = str(ref_arg)
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("SELECT referrer_id FROM referrals WHERE referred_id = ?", (uid_str,))
+            existing_ref = cursor.fetchone()
+            if not existing_ref:
+                db = load_db()
+                if db.get("referral_active", True):
+                    cursor.execute("INSERT OR REPLACE INTO referrals (referred_id, referrer_id) VALUES (?, ?)", (uid_str, referrer_id_str))
+                    conn.commit()
+                    
+                    ref_pts = db.get("referral_points", 5)
+                    users_data = load_users()
+                    if referrer_id_str in users_data["users"]:
+                        users_data["users"][referrer_id_str]["points"] = users_data["users"][referrer_id_str].get("points", 0) + ref_pts
+                        save_users(users_data)
+                        
+                        try:
+                            bot.send_message(
+                                int(referrer_id_str),
+                                f"🎉 انضم مستخدم جديد عبر رابط إحالتك!\n"
+                                f"تمت إضافة {ref_pts} نقاط إلى رصيدك 🌟"
+                            )
+                        except Exception:
+                            pass
+            conn.close()
 
     if u.id != ADMIN_ID:
         missing = check_subscription(u.id)
@@ -507,7 +566,10 @@ def start(message):
 def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
-    markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
+    markup.add(
+        types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"),
+        types.InlineKeyboardButton("🔗 إعدادات نظام الإحالة", callback_data="adm_feat_ref")
+    )
     markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
     markup.add(types.InlineKeyboardButton("🔒 قفل الخدمات بنقاط", callback_data="adm_lock_menu"))
     markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"), types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
@@ -605,12 +667,48 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
+        if data == "ref_link_get":
+            db = load_db()
+            if not db.get("referral_active", True):
+                bot.send_message(cid, "⚠️ خدمة نظام الإحالة متوقفة مؤقتاً من قبل الإدارة.")
+                return
+            bot_username = bot.get_me().username
+            ref_link = f"https://t.me/{bot_username}?start={uid}"
+            ref_pts = db.get("referral_points", 5)
+            
+            users_db = load_users()
+            u_data = users_db["users"].get(str(uid), {})
+            user_points = u_data.get("points", 0)
+            
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ?", (str(uid),))
+            ref_count = cursor.fetchone()[0]
+            conn.close()
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
+            
+            bot.send_message(
+                cid,
+                f"🔗 **نظام الإحالة وجلب النقاط المجانية**\n\n"
+                f"شارك رابطك الخاص مع أصدقائك أو في المجموعات:\n"
+                f"`{ref_link}`\n\n"
+                f"📊 **إحصائياتك:**\n"
+                f"• عدد الأشخاص الذين أحلتهم: {ref_count} شخص\n"
+                f"• النقاط المكتسبة من الإحالات: ستحصل على **{ref_pts}** نقاط عن كل مستخدم جديد يسجل عبر رابطك!\n"
+                f"• رصيدك الحالي: {user_points} نقطة 🌟",
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+            return
+
         if data == "adm_settings_list" or data == "admin_buttons_list":
             db = load_db()
             markup = build_admin_settings_markup(db, None)
             bot.edit_message_text(
                 "⚙️ **إعدادات الخدمات والأزرار:**\n\n"
-                "اختر القسم الرئيسي أو الزر الذي تريد إدارته وتعديله (يمكنك التصفح داخل الأقسام والأزرار الفرعية بكل عمق):",
+                "اختر القسم الرئيسي أو الزر الذي تريد إدارته وتعديله:",
                 cid, mid, reply_markup=markup, parse_mode="Markdown"
             )
             return
@@ -646,10 +744,7 @@ def callback(call):
             )
             
             bot.edit_message_text(
-                f"🎛 **إدارة العنصر:** «{btn['name']}»\n\n"
-                f"• النوع: {'قسم رئيسي/فرعي يحتوي على أزرار' if children else 'خدمة / زر نهائي'}\n"
-                f"• عدد الأزرار الفرعية: {len(children)}\n\n"
-                f"اختر الإجراء المطلوب:",
+                f"🎛 **إدارة العنصر:** «{btn['name']}»\n\nاختر الإجراء المطلوب:",
                 cid, mid, reply_markup=markup, parse_mode="Markdown"
             )
             return
@@ -680,9 +775,62 @@ def callback(call):
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                f"⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• اسم الخدمة: {gift_name}\n• الحالة: مفعلة ✅\n• النقاط الحالية: {current_points}\n\nاختر ما تريد تعديله:", 
+                f"⚙️ إعدادات الهدية اليومية:\n\n• الاسم: {gift_name}\n• النقاط: {current_points}\n• الحالة: مفعلة ✅", 
                 cid, mid, reply_markup=markup
             )
+            return
+
+        if data == "adm_feat_ref":
+            db = load_db()
+            ref_pts = db.get("referral_points", 5)
+            ref_name = db.get("referral_name", "رابط الإحالة")
+            ref_status = "مفعل ✅" if db.get("referral_active", True) else "معطل ❌"
+            
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("✏️ تعديل نقاط الإحالة", callback_data="edit_ref_points_val"),
+                types.InlineKeyboardButton("📝 تغيير اسم الزر", callback_data="edit_ref_name")
+            )
+            markup.add(
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف الخدمة", callback_data="toggle_ref_status"),
+                types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main")
+            )
+            bot.edit_message_text(
+                f"⚙️ **إعدادات نظام الإحالة المتقدمة:**\n\n"
+                f"• اسم الزر: {ref_name}\n"
+                f"• نقاط كل إحالة: {ref_pts} نقاط\n"
+                f"• الحالة: {ref_status}\n\n"
+                f"اختر ما تريد تعديله:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data == "edit_ref_points_val":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_ref"))
+            msg = bot.edit_message_text("✍️ أرسل الآن عدد النقاط الجديد لكل إحالة (برقم صحيح):", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_ref_points)
+            return
+
+        if data == "edit_ref_name":
+            set_state(uid, WAIT_REF_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_ref"))
+            try:
+                bot.delete_message(cid, mid)
+            except: pass
+            bot.send_message(cid, "✍️ أرسل الآن اسم زر الإحالة الجديد في القائمة الرئيسية:", reply_markup=markup)
+            return
+
+        if data == "toggle_ref_status":
+            db = load_db()
+            current_status = db.get("referral_active", True)
+            db["referral_active"] = not current_status
+            save_db(db)
+            status_text = "مفعل ✅" if db["referral_active"] else "معطل ❌"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_ref"))
+            bot.edit_message_text(f"🔄 تم تغيير حالة نظام الإحالة بنجاح!\nالحالة الآن: {status_text}", cid, mid, reply_markup=markup)
             return
 
         if data == "show_gift_points":
@@ -690,13 +838,13 @@ def callback(call):
             pts = db.get("gift_points", 2)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_gift"))
-            bot.edit_message_text(f"🎁 عدد النقاط الحالي الممنوح في الهدية اليومية هو: **{pts}** نقطة.", cid, mid, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text(f"🎁 عدد النقاط الحالي في الهدية اليومية هو: **{pts}** نقطة.", cid, mid, reply_markup=markup, parse_mode="Markdown")
             return
 
         if data == "edit_gift_points_val":
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
-            msg = bot.edit_message_text("✍️ أرسل الآن عدد النقاط الجديد (برقم صحيح):", cid, mid, reply_markup=markup)
+            msg = bot.edit_message_text("✍️ أرسل عدد النقاط الجديد:", cid, mid, reply_markup=markup)
             bot.register_next_step_handler(msg, save_new_gift_points)
             return
             
@@ -706,30 +854,8 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
             try:
                 bot.delete_message(cid, mid)
-            except:
-                pass
-            bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
-            return
-
-        if data == "change_sub_name":
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
-            msg = bot.edit_message_text("✍️ أرسل الآن اسم الخدمة الجديد للاشتراك الإجباري:", cid, mid, reply_markup=markup)
-            bot.register_next_step_handler(msg, save_new_sub_name)
-            return
-
-        if data == "add_sub_channel":
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
-            msg = bot.edit_message_text("➕ أرسل معرف القناة المراد إضافتها (مثال: @Channel):", cid, mid, reply_markup=markup)
-            bot.register_next_step_handler(msg, process_add_channel)
-            return
-
-        if data == "remove_sub_channel":
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
-            msg = bot.edit_message_text("🗑 أرسل معرف القناة المراد إزالتها:", cid, mid, reply_markup=markup)
-            bot.register_next_step_handler(msg, process_remove_channel)
+            except: pass
+            bot.send_message(cid, "✍️ أرسل اسم الهدية اليومية الجديد:", reply_markup=markup)
             return
 
         if data == "toggle_gift_status":
@@ -740,7 +866,7 @@ def callback(call):
             status_text = "مفعلة ✅" if db["gift_active"] else "معطلة ❌"
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_gift"))
-            bot.edit_message_text(f"🔄 تم تغيير حالة الهدية بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
+            bot.edit_message_text(f"🔄 الحالة الحالية للهدية: {status_text}", cid, mid, reply_markup=markup)
             return
 
         if data == "toggle_sub_status":
@@ -751,19 +877,16 @@ def callback(call):
             status_text = "مفعل ✅" if db["sub_active"] else "معطل ❌"
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_sub"))
-            bot.edit_message_text(f"🔄 تم تغيير حالة الاشتراك الإجباري بنجاح!\nالحالة الآن: {status_text}", cid, mid, reply_markup=markup)
+            bot.edit_message_text(f"🔄 الحالة الحالية: {status_text}", cid, mid, reply_markup=markup)
             return
 
         if data == "list_sub_channels":
             db = load_db()
             channels = db.get("sub_channels", REQUIRED_CHANNELS)
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
-            if channels:
-                ch_list = "\n".join([f"• {ch}" for ch in channels])
-                bot.edit_message_text(f"📋 القنوات المضافة حالياً للاشتراك الإجباري:\n\n{ch_list}", cid, mid, reply_markup=markup)
-            else:
-                bot.edit_message_text("📋 لا توجد أي قنوات مضافة حالياً للاشتراك الإجباري.", cid, mid, reply_markup=markup)
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_sub"))
+            ch_list = "\n".join([f"• {ch}" for ch in channels]) if channels else "لا توجد قنوات"
+            bot.edit_message_text(f"📋 القنوات:\n\n{ch_list}", cid, mid, reply_markup=markup)
             return
 
         if data == "adm_feat_sub":
@@ -771,21 +894,15 @@ def callback(call):
             sub_st = "مفعل ✅" if db.get("sub_active", True) else "معطل ❌"
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
-                types.InlineKeyboardButton("📋 عرض القنوات المضافة", callback_data="list_sub_channels"),
-                types.InlineKeyboardButton("➕ إضافة قناة جديدة", callback_data="add_sub_channel")
+                types.InlineKeyboardButton("📋 عرض القنوات", callback_data="list_sub_channels"),
+                types.InlineKeyboardButton("➕ إضافة قناة", callback_data="add_sub_channel")
             )
             markup.add(
                 types.InlineKeyboardButton("🗑 إزالة قناة", callback_data="remove_sub_channel"),
-                types.InlineKeyboardButton("🔄 تفعيل/إيقاف الاشتراك", callback_data="toggle_sub_status")
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف", callback_data="toggle_sub_status")
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-            bot.edit_message_text(
-                f"🛡 **إدارة الاشتراك الإجباري المتقدمة:**\n\n"
-                f"• الحالة: {sub_st}\n"
-                f"• القنوات المرتبطة: تدار عبر هذا الزر\n\n"
-                f"اختر إجراء التحكم المطلوب:", 
-                cid, mid, reply_markup=markup, parse_mode="Markdown"
-            )
+            bot.edit_message_text(f"🛡 إدارة الاشتراك الإجباري:\n• الحالة: {sub_st}", cid, mid, reply_markup=markup)
             return
 
         if data == "adm_back_main":
@@ -797,7 +914,7 @@ def callback(call):
             db = load_db()
             btn = get_button(db, btn_id)
             if not btn:
-                bot.answer_callback_query(call.id, "⚠️ هذا الزر لم يعد موجوداً.", show_alert=True)
+                bot.answer_callback_query(call.id, "⚠️ الزر غير موجود.", show_alert=True)
                 return
                 
             unlock_pts = int(btn.get("unlock_points", 0))
@@ -806,7 +923,7 @@ def callback(call):
             user = users_db["users"].get(uid_str)
             
             if not user or user.get("points", 0) < unlock_pts:
-                bot.answer_callback_query(call.id, f"❌ رصيد نقاطك غير كافٍ!\nتحتاج إلى {unlock_pts} نقطة لفتح هذه الخدمة.", show_alert=True)
+                bot.answer_callback_query(call.id, f"❌ رصيد نقاطك غير كافٍ! تحتاج {unlock_pts} نقطة.", show_alert=True)
                 return
                 
             user["points"] -= unlock_pts
@@ -815,17 +932,15 @@ def callback(call):
             user["unlocked"].append(btn_id)
             save_users(users_db)
             
-            bot.answer_callback_query(call.id, f"✅ تم الدفع (خصم {unlock_pts} نقطة) وفتح الخدمة بنجاح!", show_alert=True)
+            bot.answer_callback_query(call.id, "✅ تم الدفع وفتح الخدمة بنجاح!", show_alert=True)
             try:
                 bot.delete_message(cid, mid)
-            except: 
-                pass
+            except: pass
             send_content(cid, btn, back_only_markup(btn))
             return
 
         if data.startswith("nav_"):
             db = load_db()
-
             if uid in db.get("banned_users", []):
                 bot.send_message(cid, "⛔ أنت محظور من استخدام هذا البوت.")
                 return
@@ -833,17 +948,12 @@ def callback(call):
             if data.startswith("nav_back_"):
                 target = data[len("nav_back_") :]
                 parent_id = None if target == "root" else target
-                text = (
-                    "أهلاً بك في متجري! اختر من القائمة:"
-                    if parent_id is None
-                    else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
-                )
+                text = "أهلاً بك في متجري! اختر من القائمة:" if parent_id is None else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
                 nav_markup = build_nav_markup(db, parent_id)
                 if call.message.content_type != "text":
                     try:
                         bot.delete_message(cid, mid)
-                    except Exception as e:
-                        logger.exception("Failed to delete media message")
+                    except: pass
                     bot.send_message(cid, text, reply_markup=nav_markup)
                 else:
                     bot.edit_message_text(text, cid, mid, reply_markup=nav_markup)
@@ -856,15 +966,11 @@ def callback(call):
                 return
 
             if get_children(db, btn_id):
-                bot.edit_message_text(
-                    btn["name"], cid, mid, reply_markup=build_nav_markup(db, btn_id)
-                )
+                bot.edit_message_text(btn["name"], cid, mid, reply_markup=build_nav_markup(db, btn_id))
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
-                
                 if uid == ADMIN_ID:
                     send_content(cid, btn, back_only_markup(btn))
-                
                 elif unlock_pts > 0:
                     users_db = load_users()
                     uid_str = str(uid)
@@ -878,12 +984,10 @@ def callback(call):
                         markup = types.InlineKeyboardMarkup()
                         markup.add(types.InlineKeyboardButton(f"🔓 فتح الخدمة بـ {unlock_pts} نقطة", callback_data=f"pay_{btn_id}"))
                         markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data=f"nav_back_{btn.get('parent_id', 'root')}"))
-                        
                         payment_text = f"🔒 **خدمة مدفوعة**\n\n{desc}\n\n⚠️ **تكلفة الفتح:** {unlock_pts} نقطة."
                         
                         if call.message.content_type != "text":
-                            try:
-                                bot.delete_message(cid, mid)
+                            try: bot.delete_message(cid, mid)
                             except: pass
                             bot.send_message(cid, payment_text, reply_markup=markup, parse_mode="Markdown")
                         else:
@@ -895,7 +999,7 @@ def callback(call):
         if data == "gift_claim":
             db = load_db()
             if not db.get("gift_active", True):
-                bot.send_message(cid, "⚠️ خدمة الهدية اليومية متوقفة مؤقتاً من قبل الإدارة.")
+                bot.send_message(cid, "⚠️ الهدية اليومية متوقفة مؤقتاً.")
                 return
             success, msg = claim_daily_gift(uid)
             bot.send_message(cid, msg)
@@ -909,26 +1013,13 @@ def callback(call):
             missing = check_subscription(uid)
             if missing:
                 markup = types.InlineKeyboardMarkup()
-                markup.add(
-                    types.InlineKeyboardButton(
-                        "✅ تحقق من الاشتراك", callback_data="sub_check"
-                    )
-                )
-                bot.send_message(
-                    cid,
-                    "❌ لم تشترك في جميع القنوات المطلوبة بعد.\n"
-                    "اشترك ثم اضغط زر التحقق مجدداً أو أرسل /start.",
-                    reply_markup=markup,
-                )
+                markup.add(types.InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="sub_check"))
+                bot.send_message(cid, "❌ لم تشترك في جميع القنوات بعد.", reply_markup=markup)
             else:
                 if get_children(db, None):
-                    bot.send_message(
-                        cid,
-                        "✅ تم التحقق! أهلاً بك في متجري! اختر من القائمة:",
-                        reply_markup=build_nav_markup(db, None),
-                    )
+                    bot.send_message(cid, "✅ تم التحقق!", reply_markup=build_nav_markup(db, None))
                 else:
-                    bot.send_message(cid, "✅ تم التحقق! أهلاً بك! القائمة فارغة حالياً.")
+                    bot.send_message(cid, "✅ تم التحقق!")
             return
 
         if uid != ADMIN_ID:
@@ -936,16 +1027,8 @@ def callback(call):
 
         if data == "adm_add":
             markup = types.InlineKeyboardMarkup()
-            markup.add(
-                types.InlineKeyboardButton(
-                    "📌 زر رئيسي (بدون أب)", callback_data="adm_add_main"
-                )
-            )
-            markup.add(
-                types.InlineKeyboardButton(
-                    "🔗 زر فرعي (تحت زر موجود)", callback_data="adm_add_sub"
-                )
-            )
+            markup.add(types.InlineKeyboardButton("📌 زر رئيسي", callback_data="adm_add_main"))
+            markup.add(types.InlineKeyboardButton("🔗 زر فرعي", callback_data="adm_add_sub"))
             bot.send_message(cid, "نوع الزر الجديد:", reply_markup=markup)
 
         elif data == "adm_add_main":
@@ -956,195 +1039,95 @@ def callback(call):
             db = load_db()
             root_buttons = [b for b in db["buttons"] if b.get("parent_id") is None]
             if not root_buttons:
-                bot.send_message(cid, "⚠️ لا توجد أقسام رئيسية بعد. أضف زراً رئيسياً أولاً.")
+                bot.send_message(cid, "⚠️ لا توجد أقسام رئيسية.")
                 return
             markup = types.InlineKeyboardMarkup()
             for btn in root_buttons:
-                markup.add(
-                    types.InlineKeyboardButton(
-                        f"📁 {btn['name']}", callback_data=f"adm_sub_root_{btn['id']}"
-                    )
-                )
+                markup.add(types.InlineKeyboardButton(f"📁 {btn['name']}", callback_data=f"adm_sub_root_{btn['id']}"))
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-            bot.edit_message_text("اختر القسم الرئيسي الذي ترغب بإضافة الزر تحته:", cid, mid, reply_markup=markup)
+            bot.edit_message_text("اختر القسم الرئيسي:", cid, mid, reply_markup=markup)
 
         elif data.startswith("adm_sub_root_"):
             root_id = data[len("adm_sub_root_"):]
             db = load_db()
             root_btn = get_button(db, root_id)
-            if not root_btn:
-                bot.send_message(cid, "⚠️ القسم الرئيسي غير موجود.")
-                return
-            
             markup = types.InlineKeyboardMarkup()
-            markup.add(
-                types.InlineKeyboardButton(
-                    f"➕ إضافة مباشرة داخل «{root_btn['name']}»", 
-                    callback_data=f"adm_parent_{root_id}"
-                )
-            )
-            
+            markup.add(types.InlineKeyboardButton(f"➕ إضافة داخل «{root_btn['name']}»", callback_data=f"adm_parent_{root_id}"))
             children = get_children(db, root_id)
-            if children:
-                markup.add(types.InlineKeyboardButton("─── أو أضفه بداخل أحد الأزرار الفرعية التالية ───", callback_data="ignore"))
-                for child in children:
-                    markup.add(
-                        types.InlineKeyboardButton(
-                            f"📄 بداخل: {child['name']}", 
-                            callback_data=f"adm_parent_{child['id']}"
-                        )
-                    )
-            
-            markup.add(types.InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="adm_add_sub"))
-            bot.edit_message_text(
-                f"📂 القسم المختار: «{root_btn['name']}»\n\n"
-                f"حدد أين تريد إضافة الزر الجديد بدقة:",
-                cid, mid, reply_markup=markup
-            )
+            for child in children:
+                markup.add(types.InlineKeyboardButton(f"📄 بداخل: {child['name']}", callback_data=f"adm_parent_{child['id']}"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_add_sub"))
+            bot.edit_message_text("حدد مكان إضافة الزر:", cid, mid, reply_markup=markup)
 
         elif data.startswith("adm_parent_"):
             parent_id = data[len("adm_parent_") :]
             db = load_db()
             parent = get_button(db, parent_id)
-            if not parent:
-                bot.send_message(cid, "⚠️ الزر الأب غير موجود.")
-                return
             set_state(uid, WAIT_BTN_NAME, parent_id=parent_id)
-            bot.edit_message_text(
-                f"📝 تم اختيار المكان بنجاح تحت: «{parent['name']}»\n\n"
-                f"أرسل الآن **اسم الزر الجديد**:\n/cancel للإلغاء",
-                cid,
-                mid,
-                parse_mode="Markdown"
-            )
+            bot.edit_message_text(f"أرسل **اسم الزر الجديد** تحت «{parent['name']}»:", cid, mid, parse_mode="Markdown")
 
         elif data == "adm_lock_menu":
             db = load_db()
             leaves = [b for b in db["buttons"] if not get_children(db, b["id"]) and b.get("parent_id") is not None]
-            
             if not leaves:
-                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار فرعية داخل القوائم لقفلها بعد.")
+                bot.send_message(cid, "⚠️ لا توجد خدمات لقفلها.")
                 return
-                
             markup = types.InlineKeyboardMarkup()
             for btn in leaves:
                 is_locked = int(btn.get("unlock_points", 0)) > 0
                 lock_icon = " 🔒" if is_locked else " 🔓"
-                p = get_button(db, btn["parent_id"]) if btn.get("parent_id") else None
-                path = f"  ← {p['name']}" if p else ""
-                markup.add(
-                    types.InlineKeyboardButton(
-                        f"{btn['name']}{lock_icon}{path}",
-                        callback_data=f"lockbtn_{btn['id']}",
-                    )
-                )
+                markup.add(types.InlineKeyboardButton(f"{btn['name']}{lock_icon}", callback_data=f"lockbtn_{btn['id']}"))
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
-            bot.edit_message_text(
-                "اختر الخدمة/الزر الفرعي لتعيين أو إلغاء القفل بالنقاط:\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
-                cid, mid, reply_markup=markup,
-            )
+            bot.edit_message_text("اختر الخدمة لتعيين القفل بالنقاط:", cid, mid, reply_markup=markup)
 
         elif data.startswith("lockbtn_"):
             btn_id = data[len("lockbtn_") :]
             db = load_db()
             btn = get_button(db, btn_id)
-            if not btn:
-                bot.send_message(cid, "⚠️ الزر غير موجود.")
-                return
-            
-            current_pts = btn.get("unlock_points", 0)
-            current_status = f"مقفول بـ {current_pts} نقطة" if int(current_pts) > 0 else "مفتوح (مجاني)"
-            
             set_state(uid, WAIT_LOCK_POINTS, btn_id=btn_id)
-            bot.send_message(
-                cid,
-                f"⚙️ إعدادات القفل للزر: «{btn['name']}»\n"
-                f"الحالة الحالية: {current_status}\n\n"
-                f"أرسل الآن **عدد النقاط** المطلوب لفتح هذه الخدمة (أرسل 0 لإلغاء القفل):\n/cancel للإلغاء",
-                parse_mode="Markdown"
-            )
+            bot.send_message(cid, f"أرسل عدد النقاط المطلوبة لفتح «{btn['name']}» (0 للإلغاء):")
 
         elif data == "adm_delete":
             db = load_db()
-            if not db["buttons"]:
-                bot.send_message(cid, "لا توجد أزرار لحذفها.")
-                return
             markup = types.InlineKeyboardMarkup()
             for btn in db["buttons"]:
-                p = get_button(db, btn["parent_id"]) if btn.get("parent_id") else None
-                is_locked = int(btn.get("unlock_points", 0)) > 0
-                lock_hint = " 🔒" if is_locked else ""
-                base = f"{btn['name']}{lock_hint}"
-                label = f"🗑 {base}  ← {p['name']}" if p else f"🗑 {base}"
-                markup.add(
-                    types.InlineKeyboardButton(label, callback_data=f"del_{btn['id']}")
-                )
-            bot.send_message(
-                cid, "اختر الزر لحذفه (سيُحذف مع كل أبنائه):", reply_markup=markup
-            )
+                markup.add(types.InlineKeyboardButton(f"🗑 {btn['name']}", callback_data=f"del_{btn['id']}"))
+            bot.send_message(cid, "اختر الزر للحذف:", reply_markup=markup)
 
         elif data.startswith("del_") or data.startswith("delete_btn_"):
             btn_id = data.replace("del_", "").replace("delete_btn_", "")
             db = load_db()
-            btn = get_button(db, btn_id)
-            if not btn:
-                bot.send_message(cid, "الزر غير موجود.")
-                return
             descendants = collect_descendants(db, btn_id)
-            total = len(descendants)
-            db["buttons"] = [
-                b for b in db["buttons"] if b["id"] not in descendants and b["id"] != btn_id
-            ]
+            db["buttons"] = [b for b in db["buttons"] if b["id"] not in descendants and b["id"] != btn_id]
             save_db(db)
-            extra = f" و{total} زر فرعي" if total else ""
-            bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
+            bot.send_message(cid, "✅ تم الحذف بنجاح.")
 
         elif data == "adm_users":
+            db = load_db()
+            users = db.get("users", [])
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("👁 عرض المستخدمين", callback_data="usr_view"))
             markup.add(types.InlineKeyboardButton("🚫 حظر مستخدم", callback_data="usr_ban"))
             markup.add(types.InlineKeyboardButton("✅ رفع الحظر", callback_data="usr_unban"))
-            bot.send_message(cid, "👥 إدارة المستخدمين:", reply_markup=markup)
+            bot.send_message(cid, f"👥 إجمالي المستخدمين: {len(users)}", reply_markup=markup)
 
         elif data == "usr_view":
             db = load_db()
             users = db.get("users", [])
-            banned = db.get("banned_users", [])
-            if not users:
-                bot.send_message(cid, "لا يوجد مستخدمون مسجلون بعد.")
-                return
-            lines = [f"• {u}{' 🚫' if u in banned else ''}" for u in users]
-            bot.send_message(
-                cid,
-                f"👥 المستخدمون ({len(users)}):\n" + "\n".join(lines) + "\n\n🚫 = محظور",
-            )
+            bot.send_message(cid, f"👥 المستخدمون:\n" + "\n".join([str(u) for u in users[:50]]))
 
         elif data == "usr_ban":
             set_state(uid, WAIT_BAN)
-            bot.send_message(cid, "أرسل ID المستخدم لحظره:\n/cancel للإلغاء")
+            bot.send_message(cid, "أرسل ID المستخدم لحظره:")
 
         elif data == "usr_unban":
-            db = load_db()
-            banned = db.get("banned_users", [])
-            if not banned:
-                bot.send_message(cid, "لا يوجد مستخدمون محظورون.")
-                return
             set_state(uid, WAIT_UNBAN)
-            bot.send_message(
-                cid,
-                "المحظورون:\n"
-                + "\n".join(f"• {u}" for u in banned)
-                + "\n\nأرسل ID لرفع حظره:\n/cancel للإلغاء",
-            )
+            bot.send_message(cid, "أرسل ID المستخدم لرفع حظره:")
 
         elif data == "adm_broadcast":
             db = load_db()
             set_state(uid, WAIT_BROADCAST)
-            bot.send_message(
-                cid,
-                f"📣 أرسل الرسالة للبث إلى {len(db['users'])} مستخدم:\n"
-                f"(يمكنك إرسال نص، صورة، فيديو، ملف...)\n/cancel للإلغاء",
-            )
+            bot.send_message(cid, f"📣 أرسل رسالة البث لـ {len(db['users'])} مستخدم:")
 
     except Exception as e:
         report_admin_error(e, "callback")
@@ -1159,11 +1142,6 @@ def handle_state(message):
     state = get_state(uid)
 
     if state is None:
-        if uid != ADMIN_ID:
-            try:
-                bot.forward_message(ADMIN_ID, cid, message.message_id)
-            except Exception as e:
-                logger.exception("Failed to forward message")
         return
 
     if message.content_type == "text" and message.text.strip().startswith("/cancel"):
@@ -1173,50 +1151,29 @@ def handle_state(message):
 
     if state == WAIT_BTN_NAME:
         if message.content_type != "text":
-            bot.send_message(cid, "⚠️ أرسل اسم الزر كنص من فضلك.")
+            bot.send_message(cid, "⚠️ أرسل الاسم كنص.")
             return
         btn_name = message.text.strip()
         parent_id = get_data(uid).get("parent_id")
         set_state(uid, WAIT_BTN_CONTENT, parent_id=parent_id, btn_name=btn_name)
-        bot.send_message(
-            cid,
-            f"✅ الاسم: «{btn_name}»\n\n"
-            f"الآن أرسل المحتوى للزر (نص، صورة، فيديو، ملف...):\n/cancel للإلغاء",
-        )
+        bot.send_message(cid, f"الآن أرسل محتوى الزر «{btn_name}»:")
 
     elif state == WAIT_BTN_CONTENT:
-        bot.send_message(cid, "⏳ تم استلام المحتوى وحفظه...")
         d = get_data(uid)
         parent_id = d.get("parent_id")
         btn_name = d.get("btn_name", "زر")
         ct, content = extract_content(message)
         
         db = load_db()
-        db["buttons"].append(
-            {
-                "id": new_id(),
-                "name": btn_name,
-                "content_type": ct,
-                "content": content,
-                "parent_id": parent_id,
-                "unlock_points": 0,
-                "unlock_desc": ""
-            }
-        )
+        db["buttons"].append({
+            "id": new_id(), "name": btn_name, "content_type": ct,
+            "content": content, "parent_id": parent_id, "unlock_points": 0, "unlock_desc": ""
+        })
         save_db(db)
         clear_state(uid)
-        
-        bot.send_message(
-            cid,
-            f"✅ تم حفظ الزر «{btn_name}» بنجاح في المكان المختار!\n"
-            f"نوع المحتوى: {ct}\n\n"
-            f"💡 **تلميح:** لإدارة القفل والنقاط، انتقل إلى «لوحة التحكم» ➔ «قفل الخدمات بنقاط».",
-        )
+        bot.send_message(cid, f"✅ تم حفظ الزر «{btn_name}» بنجاح!")
 
     elif state == WAIT_LOCK_POINTS:
-        if message.content_type != "text":
-            bot.send_message(cid, "⚠️ أرسل عدد النقاط كرقم صحيح.")
-            return
         try:
             pts = int(message.text.strip())
             btn_id = get_data(uid).get("btn_id")
@@ -1227,152 +1184,91 @@ def handle_state(message):
                 btn["unlock_desc"] = ""
                 save_db(db)
                 clear_state(uid)
-                bot.send_message(cid, f"✅ تم إلغاء القفل عن الخدمة «{btn['name']}» وأصبحت مجانية.")
+                bot.send_message(cid, "✅ تم إلغاء القفل وأصبح مجانياً.")
             else:
                 set_state(uid, WAIT_LOCK_DESC, btn_id=btn_id, points=pts)
-                bot.send_message(
-                    cid, 
-                    "✍️ ممتاز! أرسل الآن **الرسالة أو الوصف** الذي سيظهر للمستخدم قبل الدفع:\n/cancel للإلغاء"
-                )
+                bot.send_message(cid, "✍️ أرسل رسالة الوصف التي ستظهر للمستخدم قبل الدفع:")
         except ValueError:
-            bot.send_message(cid, "❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+            bot.send_message(cid, "❌ أرسل رقماً صحيحاً.")
 
     elif state == WAIT_LOCK_DESC:
-        if message.content_type != "text":
-            bot.send_message(cid, "⚠️ أرسل الوصف كنص من فضلك.")
-            return
-            
         desc = message.text.strip()
-        data_dict = get_data(uid)
-        btn_id = data_dict.get("btn_id")
-        pts = data_dict.get("points")
-        
+        d = get_data(uid)
+        btn_id = d.get("btn_id")
+        pts = d.get("points")
         db = load_db()
         btn = get_button(db, btn_id)
         if btn:
             btn["unlock_points"] = pts
             btn["unlock_desc"] = desc
             save_db(db)
-            
         clear_state(uid)
-        bot.send_message(
-            cid, 
-            f"✅ **تم قفل الخدمة بنجاح!**\n\n• الخدمة: {btn['name']}\n• سعر الفتح: {pts} نقطة", 
-            parse_mode="Markdown"
-        )
-            
+        bot.send_message(cid, f"✅ تم القفل بنجاح (السعر: {pts} نقطة).")
+
     elif state == WAIT_GIFT_NAME:
-        if message.content_type != "text":
-            bot.send_message(cid, "⚠️ أرسل الاسم كنص من فضلك.")
-            return
         new_name = message.text.strip()
         db = load_db()
         db["gift_name"] = new_name
         save_db(db)
         clear_state(uid)
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الهدية", callback_data="adm_feat_gift"))
-        bot.send_message(
-            cid, 
-            f"✅ **تم تغيير اسم خدمة الهدية بنجاح!**\n\n• الاسم الجديد: {new_name}", 
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
-        return
-    
+        bot.send_message(cid, f"✅ تم تغيير اسم الهدية إلى: {new_name}")
+
+    elif state == WAIT_REF_NAME:
+        new_name = message.text.strip()
+        db = load_db()
+        db["referral_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+        bot.send_message(cid, f"✅ تم تغيير اسم زر الإحالة إلى: {new_name}")
+
     elif state == "WAIT_DYNAMIC_BTN_EDIT":
-        if message.content_type != "text":
-            bot.send_message(cid, "⚠️ عذراً، يجب إرسال القيمة الجديدة كنص.")
-            return
-            
         state_data = get_data(uid)
         btn_id = state_data.get("btn_id")
         edit_key = state_data.get("edit_key")
         new_value = message.text.strip()
-        
         db = load_db()
         btn = get_button(db, btn_id)
-        
-        if not btn:
-            bot.send_message(cid, "⚠️ هذا الزر لم يعد موجوداً.")
-            clear_state(uid)
-            return
-            
-        if edit_key == "name":
-            btn["name"] = new_value
-        elif edit_key == "content":
-            btn["content"] = new_value
-        elif edit_key == "points":
-            if "settings" not in btn:
-                btn["settings"] = {}
-            btn["settings"]["points"] = new_value
-        else:
+        if btn:
             btn[edit_key] = new_value
-            
-        save_db(db)
+            save_db(db)
         clear_state(uid)
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔙 العودة لقائمة إعدادات الخدمات", callback_data="adm_settings_list"))
-        
-        bot.send_message(
-            cid,
-            f"✅ **تم التعديل والحفظ بنجاح!**\n\n• العنصر: {btn.get('name')}",
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
+        bot.send_message(cid, "✅ تم التعديل بنجاح.")
 
     elif state == WAIT_BAN:
-        if message.content_type != "text":
-            bot.send_message(cid, "⚠️ أرسل ID المستخدم كرقم.")
-            return
         try:
             target_id = int(message.text.strip())
             db = load_db()
             if target_id not in db.get("banned_users", []):
                 db.setdefault("banned_users", []).append(target_id)
                 save_db(db)
-                bot.send_message(cid, f"✅ تم حظر المستخدم {target_id}.")
-            else:
-                bot.send_message(cid, f"المستخدم {target_id} محظور مسبقاً.")
+                bot.send_message(cid, f"✅ تم الحظر.")
         except ValueError:
-            bot.send_message(cid, "⚠️ ID غير صحيح.")
+            pass
         clear_state(uid)
 
     elif state == WAIT_UNBAN:
-        if message.content_type != "text":
-            bot.send_message(cid, "⚠️ أرسل ID المستخدم كرقم.")
-            return
         try:
             target_id = int(message.text.strip())
             db = load_db()
             if target_id in db.get("banned_users", []):
                 db["banned_users"].remove(target_id)
                 save_db(db)
-                bot.send_message(cid, f"✅ تم رفع الحظر عن {target_id}.")
-            else:
-                bot.send_message(cid, f"المستخدم ليس محظوراً.")
+                bot.send_message(cid, f"✅ تم رفع الحظر.")
         except ValueError:
-            bot.send_message(cid, "⚠️ ID غير صحيح.")
+            pass
         clear_state(uid)
 
     elif state == WAIT_BROADCAST:
-        bot.send_message(cid, "⏳ جاري الإرسال...")
         db = load_db()
         sent = 0
-        failed = 0
         for target_uid in db.get("users", []):
-            if target_uid == ADMIN_ID:
-                continue
+            if target_uid == ADMIN_ID: continue
             try:
                 bot.copy_message(target_uid, cid, message.message_id)
                 sent += 1
-            except Exception as e:
-                logger.exception("Failed to send broadcast")
-                failed += 1
+            except: pass
         clear_state(uid)
-        bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
+        bot.send_message(cid, f"📣 تم البث بنجاح لـ {sent} مستخدم.")
 
 def save_new_gift_points(message):
     try:
@@ -1380,72 +1276,24 @@ def save_new_gift_points(message):
         db = load_db()
         db["gift_points"] = new_pts
         save_db(db)
-        bot.send_message(message.chat.id, f"✅ تم تحديث نقاط الهدية اليومية إلى: {new_pts} نقطة.")
+        bot.send_message(message.chat.id, f"✅ تم التحديث إلى {new_pts} نقطة.")
     except ValueError:
-        bot.send_message(message.chat.id, f"❌ خطأ: أرسل رقماً صحيحاً.")
+        bot.send_message(message.chat.id, "❌ خطأ في الرقم.")
 
-def save_new_sub_name(message):
-    new_name = message.text.strip()
-    db = load_db()
-    db["sub_name"] = new_name
-    save_db(db)
-    bot.send_message(message.chat.id, f"✅ تم التحديث بنجاح.")
-
-def process_add_channel(message):
-    cid = message.chat.id
-    raw_text = message.text.strip()
-    ch = raw_text
-    if "t.me/" in ch:
-        ch = "@" + ch.split("t.me/")[-1].split("/")[0].strip()
-    elif not ch.startswith("@"):
-        ch = "@" + ch
-        
+def save_new_ref_points(message):
     try:
-        chat_info = bot.get_chat(ch)
-        if chat_info.type != "channel":
-            bot.send_message(cid, "❌ المعرف ليس لقناة عامة.")
-            return
-            
-        bot_member = bot.get_chat_member(ch, bot.get_me().id)
-        if bot_member.status not in ('administrator', 'creator'):
-            bot.send_message(cid, "❌ البوت ليس مشرفاً في هذه القناة!")
-            return
-            
+        new_pts = int(message.text.strip())
         db = load_db()
-        if "sub_channels" not in db:
-            db["sub_channels"] = REQUIRED_CHANNELS.copy()
-            
-        if any(c.lower() == ch.lower() for c in db["sub_channels"]):
-            bot.send_message(cid, f"⚠️ القناة ({ch}) مضافة مسبقاً.")
-            return
-            
-        db["sub_channels"].append(ch)
+        db["referral_points"] = new_pts
         save_db(db)
-        bot.send_message(cid, f"✅ تمت إضافة القناة ({ch}) بنجاح!")
-    except Exception as e:
-        logger.exception("Failed to add channel")
-        bot.send_message(cid, "❌ خطأ في التحقق من القناة! تأكد من صحة المعرف وأن البوت مشرف فيها.")
+        bot.send_message(message.chat.id, f"✅ تم تحديث نقاط الإحالة إلى: {new_pts} نقطة لكل شخص.")
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ خطأ: يرجى إرسال رقم صحيح.")
 
-def process_remove_channel(message):
-    ch = message.text.strip()
-    db = load_db()
-    channels = db.get("sub_channels", REQUIRED_CHANNELS)
-    if ch in channels:
-        channels.remove(ch)
-        db["sub_channels"] = channels
-        save_db(db)
-        bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
-    else:
-        bot.send_message(message.chat.id, f"❌ القناة غير موجودة في القائمة.")
-
-logger.info("Bot is starting (polling with SQLite)...")
+logger.info("Bot is starting (polling with SQLite & Referrals)...")
 while True:
     try:
         bot.infinity_polling(timeout=60, long_polling_timeout=60)
     except Exception as e:
         logger.exception("Polling crashed")
-        try:
-            bot.send_message(ADMIN_ID, f"⚠️ Bot crashed: {type(e).__name__}")
-        except Exception:
-            pass
         time.sleep(5)
