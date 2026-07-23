@@ -193,7 +193,6 @@ GIFT_INTERVAL = 86400  # 24 hours in seconds
 
 
 def claim_daily_gift(user_id):
-    """Try to claim the daily gift using values saved in database."""
     users_data = load_users()
     db = load_db()
     
@@ -316,7 +315,6 @@ def build_nav_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     for btn in children:
-        # إضافة رمز القفل إذا كان الزر مقفولاً بنقاط
         is_locked = int(btn.get("unlock_points", 0)) > 0
         lock_icon = " 🔒" if is_locked else ""
         markup.add(
@@ -347,6 +345,32 @@ def back_only_markup(btn):
             "🔙 رجوع", callback_data=f"nav_back_{parent_id if parent_id else 'root'}"
         )
     )
+    return markup
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR
+# ═══════════════════════════════════════════════════════════════
+
+def build_admin_settings_markup(db, parent_id=None):
+    children = get_children(db, parent_id)
+    markup = types.InlineKeyboardMarkup()
+    for btn in children:
+        has_sub = len(get_children(db, btn["id"])) > 0
+        icon = "📁" if has_sub else "📄"
+        is_locked = int(btn.get("unlock_points", 0)) > 0
+        lock_icon = " 🔒" if is_locked else ""
+        markup.add(
+            types.InlineKeyboardButton(f"{icon} {btn['name']}{lock_icon}", callback_data=f"adm_set_click_{btn['id']}")
+        )
+    if parent_id is not None:
+        parent = get_button(db, parent_id)
+        back_to = parent.get("parent_id") if parent else None
+        markup.add(
+            types.InlineKeyboardButton("🔙 رجوع", callback_data=f"adm_set_back_{back_to if back_to else 'root'}")
+        )
+    else:
+        markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
     return markup
 
 
@@ -446,7 +470,7 @@ def handle_dynamic_admin_actions(call):
             types.InlineKeyboardButton("💎 تعديل النقاط/الإعدادات", callback_data=f"change_{btn_id}_points"),
             types.InlineKeyboardButton("🗑️ حذف الخدمة/الزر", callback_data=f"delete_btn_{btn_id}")
         )
-        markup.add(types.InlineKeyboardButton("🔙 عودة لقائمة الخدمات", callback_data="admin_buttons_list"))
+        markup.add(types.InlineKeyboardButton("🔙 عودة لقائمة إعدادات الخدمات", callback_data="adm_settings_list"))
         
         bot.edit_message_text(
             f"⚙️ **لوحة التحكم الخاصة بـ:** «{btn_name}»\n\n"
@@ -504,6 +528,67 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
+        # ─── معالجة زر إعدادات الخدمات والأزرار الشامل ───
+        if data == "adm_settings_list" or data == "admin_buttons_list":
+            db = load_db()
+            markup = build_admin_settings_markup(db, None)
+            bot.edit_message_text(
+                "⚙️ **إعدادات الخدمات والأزرار:**\n\n"
+                "اختر القسم الرئيسي أو الزر الذي تريد إدارته وتعديله (يمكنك التصفح داخل الأقسام والأزرار الفرعية بكل عمق):",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("adm_set_back_"):
+            db = load_db()
+            target = data[len("adm_set_back_"):]
+            parent_id = None if target == "root" else target
+            markup = build_admin_settings_markup(db, parent_id)
+            title = "⚙️ **إعدادات الخدمات والأزرار:**\n\nاختر القسم أو الزر:" if parent_id is None else f"⚙️ إدارة قسم: «{(get_button(db, parent_id) or {}).get('name', '')}»"
+            bot.edit_message_text(title, cid, mid, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        if data.startswith("adm_set_click_"):
+            btn_id = data[len("adm_set_click_"):]
+            db = load_db()
+            btn = get_button(db, btn_id)
+            if not btn:
+                bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
+                return
+            
+            children = get_children(db, btn_id)
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                types.InlineKeyboardButton("⚙️ تعديل اسم، محتوى أو إعدادات هذا الزر", callback_data=f"adm_edit_{btn_id}")
+            )
+            if children:
+                markup.add(
+                    types.InlineKeyboardButton(f"📂 استعراض الأزرار الفرعية بداخله ({len(children)})", callback_data=f"adm_set_subnav_{btn_id}")
+                )
+            markup.add(
+                types.InlineKeyboardButton("🔙 رجوع للقائمة السابقة", callback_data=f"adm_set_back_{btn.get('parent_id') if btn.get('parent_id') else 'root'}")
+            )
+            
+            bot.edit_message_text(
+                f"🎛 **إدارة العنصر:** «{btn['name']}»\n\n"
+                f"• النوع: {'قسم رئيسي/فرعي يحتوي على أزرار' if children else 'خدمة / زر نهائي'}\n"
+                f"• عدد الأزرار الفرعية: {len(children)}\n\n"
+                f"اختر الإجراء المطلوب:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("adm_set_subnav_"):
+            btn_id = data[len("adm_set_subnav_"):]
+            db = load_db()
+            markup = build_admin_settings_markup(db, btn_id)
+            btn = get_button(db, btn_id)
+            bot.edit_message_text(
+                f"📂 الأزرار الفرعية داخل: «{btn['name'] if btn else ''}»\n\nاختر الزر الفرعي المطلوب إدارته:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
         if data == "adm_feat_gift":
             db = load_db()
             current_points = db.get("gift_points", 2)
@@ -543,12 +628,10 @@ def callback(call):
             set_state(uid, WAIT_GIFT_NAME)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_gift"))
-            
             try:
                 bot.delete_message(cid, mid)
             except:
                 pass
-                
             bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
             return
 
@@ -632,11 +715,6 @@ def callback(call):
         if data == "adm_back_main":
             bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
             return
-            
-        if data == "adm_settings_list":
-            # list_buttons_for_settings(call)  # Needs actual definition if used outside snippet
-            pass
-            return
 
         # الدفع مقابل الأزرار المدفوعة
         if data.startswith("pay_"):
@@ -656,7 +734,6 @@ def callback(call):
                 bot.answer_callback_query(call.id, f"❌ رصيد نقاطك غير كافٍ!\nتحتاج إلى {unlock_pts} نقطة لفتح هذه الخدمة.", show_alert=True)
                 return
                 
-            # خصم النقاط وحفظ الخدمة كمفتوحة للمستخدم
             user["points"] -= unlock_pts
             if "unlocked" not in user:
                 user["unlocked"] = []
@@ -664,12 +741,10 @@ def callback(call):
             save_users(users_db)
             
             bot.answer_callback_query(call.id, f"✅ تم الدفع (خصم {unlock_pts} نقطة) وفتح الخدمة بنجاح!", show_alert=True)
-            
             try:
                 bot.delete_message(cid, mid)
             except: 
                 pass
-                
             send_content(cid, btn, back_only_markup(btn))
             return
 
@@ -712,11 +787,9 @@ def callback(call):
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
                 
-                # تخطي الإدارة (صاحب البوت يفتح مباشرة)
                 if uid == ADMIN_ID:
                     send_content(cid, btn, back_only_markup(btn))
                 
-                # للمستخدم العادي: التحقق من نظام القفل بالنقاط
                 elif unlock_pts > 0:
                     users_db = load_users()
                     uid_str = str(uid)
@@ -724,10 +797,8 @@ def callback(call):
                     user_unlocked = user_data_db.get("unlocked", [])
                     
                     if btn_id in user_unlocked:
-                        # المستخدم قد دفع مسبقاً، افتح له فوراً
                         send_content(cid, btn, back_only_markup(btn))
                     else:
-                        # عرض واجهة الدفع مع الوصف
                         desc = btn.get("unlock_desc", "هذا المحتوى حصري ومقفول.")
                         markup = types.InlineKeyboardMarkup()
                         markup.add(types.InlineKeyboardButton(f"🔓 فتح الخدمة بـ {unlock_pts} نقطة", callback_data=f"pay_{btn_id}"))
@@ -743,7 +814,6 @@ def callback(call):
                         else:
                             bot.edit_message_text(payment_text, cid, mid, reply_markup=markup, parse_mode="Markdown")
                 else:
-                    # زر مجاني، يتم فتحه مباشرة
                     send_content(cid, btn, back_only_markup(btn))
             return
 
@@ -810,19 +880,53 @@ def callback(call):
 
         elif data == "adm_add_sub":
             db = load_db()
-            if not db["buttons"]:
-                bot.send_message(cid, "⚠️ لا توجد أزرار بعد. أضف زراً رئيسياً أولاً.")
+            root_buttons = [b for b in db["buttons"] if b.get("parent_id") is None]
+            if not root_buttons:
+                bot.send_message(cid, "⚠️ لا توجد أقسام رئيسية (في الواجهة الرئيسية) بعد. أضف زراً رئيسياً أولاً.")
                 return
             markup = types.InlineKeyboardMarkup()
-            for btn in db["buttons"]:
-                p = get_button(db, btn["parent_id"]) if btn.get("parent_id") else None
-                label = f"{btn['name']}  ← {p['name']}" if p else btn["name"]
+            for btn in root_buttons:
                 markup.add(
                     types.InlineKeyboardButton(
-                        label, callback_data=f"adm_parent_{btn['id']}"
+                        f"📁 {btn['name']}", callback_data=f"adm_sub_root_{btn['id']}"
                     )
                 )
-            bot.send_message(cid, "اختر الزر الأب:", reply_markup=markup)
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+            bot.edit_message_text("اختر القسم الرئيسي الذي ترغب بإضافة الزر تحته:", cid, mid, reply_markup=markup)
+
+        elif data.startswith("adm_sub_root_"):
+            root_id = data[len("adm_sub_root_"):]
+            db = load_db()
+            root_btn = get_button(db, root_id)
+            if not root_btn:
+                bot.send_message(cid, "⚠️ القسم الرئيسي غير موجود.")
+                return
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton(
+                    f"➕ إضافة مباشرة داخل «{root_btn['name']}»", 
+                    callback_data=f"adm_parent_{root_id}"
+                )
+            )
+            
+            children = get_children(db, root_id)
+            if children:
+                markup.add(types.InlineKeyboardButton("─── أو أضفه بداخل أحد الأزرار الفرعية التالية ───", callback_data="ignore"))
+                for child in children:
+                    markup.add(
+                        types.InlineKeyboardButton(
+                            f"📄 بداخل: {child['name']}", 
+                            callback_data=f"adm_parent_{child['id']}"
+                        )
+                    )
+            
+            markup.add(types.InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="adm_add_sub"))
+            bot.edit_message_text(
+                f"📂 القسم المختار: «{root_btn['name']}»\n\n"
+                f"حدد أين تريد إضافة الزر الجديد بدقة:",
+                cid, mid, reply_markup=markup
+            )
 
         elif data.startswith("adm_parent_"):
             parent_id = data[len("adm_parent_") :]
@@ -832,17 +936,21 @@ def callback(call):
                 bot.send_message(cid, "⚠️ الزر الأب غير موجود.")
                 return
             set_state(uid, WAIT_BTN_NAME, parent_id=parent_id)
-            bot.send_message(
-                cid, f"📝 أرسل اسم الزر الفرعي تحت «{parent['name']}»:\n/cancel للإلغاء"
+            bot.edit_message_text(
+                cid, 
+                f"📝 تم اختيار المكان بنجاح تحت: «{parent['name']}»\n\n"
+                f"أرسل الآن **اسم الزر الجديد**:\n/cancel للإلغاء",
+                parse_mode="Markdown"
             )
 
-        # ── نظام القفل بالنقاط الجديد ──
         elif data == "adm_lock_menu":
             db = load_db()
-            leaves = [b for b in db["buttons"] if not get_children(db, b["id"])]
+            leaves = [b for b in db["buttons"] if not get_children(db, b["id"]) and b.get("parent_id") is not None]
+            
             if not leaves:
-                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار نهائية لقفلها بعد.")
+                bot.send_message(cid, "⚠️ لا توجد خدمات أو أزرار فرعية داخل القوائم لقفلها بعد.\n(أزرار الواجهة الرئيسية مستثناة ولا يمكن قفلها).")
                 return
+                
             markup = types.InlineKeyboardMarkup()
             for btn in leaves:
                 is_locked = int(btn.get("unlock_points", 0)) > 0
@@ -857,7 +965,7 @@ def callback(call):
                 )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                "اختر الخدمة/الزر لتعيين أو إلغاء القفل بالنقاط:\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
+                "اختر الخدمة/الزر الفرعي لتعيين أو إلغاء القفل بالنقاط:\n(ملاحظة: أزرار الواجهة الرئيسية غير متاح قفلها هنا)\n(🔒 = مقفول ومدفوع | 🔓 = مفتوح مجاناً)",
                 cid, mid, reply_markup=markup,
             )
 
@@ -900,8 +1008,8 @@ def callback(call):
                 cid, "اختر الزر لحذفه (سيُحذف مع كل أبنائه):", reply_markup=markup
             )
 
-        elif data.startswith("del_"):
-            btn_id = data[len("del_") :]
+        elif data.startswith("del_") or data.startswith("delete_btn_"):
+            btn_id = data.replace("del_", "").replace("delete_btn_", "")
             db = load_db()
             btn = get_button(db, btn_id)
             if not btn:
@@ -916,7 +1024,7 @@ def callback(call):
             ]
             save_db(db)
             extra = f" و{total} زر فرعي" if total else ""
-            bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra}.")
+            bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
 
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup()
@@ -1031,11 +1139,10 @@ def handle_state(message):
         )
         save_db(db)
         clear_state(uid)
-        level = "رئيسي" if parent_id is None else "فرعي"
         
         bot.send_message(
             cid,
-            f"✅ تم حفظ الزر {level} «{btn_name}» بنجاح!\n"
+            f"✅ تم حفظ الزر «{btn_name}» بنجاح في المكان المختار!\n"
             f"نوع المحتوى: {ct}\n\n"
             f"💡 **تلميح:** إذا أردت قفل هذا الزر بنقاط، يمكنك الذهاب إلى «لوحة التحكم» ➔ «قفل الخدمات بنقاط».",
         )
@@ -1048,7 +1155,6 @@ def handle_state(message):
             pts = int(message.text.strip())
             btn_id = get_data(uid).get("btn_id")
             if pts <= 0:
-                # إزالة القفل
                 db = load_db()
                 btn = get_button(db, btn_id)
                 btn["unlock_points"] = 0
@@ -1089,7 +1195,7 @@ def handle_state(message):
             f"✅ **تم قفل الخدمة بنجاح!**\n\n"
             f"• الخدمة: {btn['name']}\n"
             f"• سعر الفتح: {pts} نقطة\n"
-            f"• وصف الخدمة (الذي سيظهر للمستخدمين):\n{desc}", 
+            f"• وصف الخدمة:\n{desc}", 
             parse_mode="Markdown"
         )
             
@@ -1165,21 +1271,6 @@ def handle_state(message):
         bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
 
 
-def update_json_setting(btn_id, key, new_value):
-    db = load_db()
-    for btn in db["buttons"]:
-        if btn["id"] == btn_id:
-            if "settings" not in btn:
-                btn["settings"] = {}
-            btn["settings"][key] = new_value
-            break
-    save_db(db)
-
-
-def finish_update(message, btn_id, key):
-    update_json_setting(btn_id, key, message.text)
-    bot.send_message(message.chat.id, f"✅ تم تحديث {key} بنجاح!")
-
 def save_new_gift_points(message):
     try:
         new_pts = int(message.text.strip())
@@ -1189,20 +1280,6 @@ def save_new_gift_points(message):
         bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الهدية اليومية بنجاح إلى: {new_pts} نقطة.")
     except ValueError:
         bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
-
-def save_new_gift_name(message):
-    new_name = message.text.strip()
-    db = load_db()
-    db["gift_name"] = new_name
-    save_db(db)
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الهدية", callback_data="adm_feat_gift"))
-    bot.send_message(
-        message.chat.id, 
-        f"✅ **تم تغيير اسم خدمة الهدية بنجاح!**\n\n• الاسم الجديد: {new_name}", 
-        reply_markup=markup,
-        parse_mode="Markdown"
-    )
 
 def save_new_sub_name(message):
     new_name = message.text.strip()
@@ -1227,7 +1304,6 @@ def process_add_channel(message):
         
     try:
         chat_info = bot.get_chat(ch)
-        
         if chat_info.type != "channel":
             bot.send_message(cid, "❌ خطأ: المعرف المُرسل ليس لقناة عامة في تيليجرام.")
             return
@@ -1237,12 +1313,6 @@ def process_add_channel(message):
             bot.send_message(cid, "❌ خطأ الشروط: البوت ليس مشرفاً في هذه القناة! أضفه مشرفاً أولاً.")
             return
             
-        if bot_member.status == 'administrator':
-            can_post = getattr(bot_member, 'can_post_messages', True)
-            if not can_post:
-                bot.send_message(cid, "❌ خطأ: البوت لا يملك صلاحية إرسال الرسائل في هذه القناة.")
-                return
-
         db = load_db()
         if "sub_channels" not in db:
             db["sub_channels"] = REQUIRED_CHANNELS.copy()
@@ -1260,14 +1330,9 @@ def process_add_channel(message):
             f"• اسم القناة: {chat_info.title}\n"
             f"• المعرف: {ch}"
         )
-            
     except Exception as e:
         logger.exception("Failed to add channel %s: %s", ch, e)
-        bot.send_message(
-            cid, 
-            "❌ خطأ في التحقق من القناة!\n"
-            "تأكد من صحة الرابط أو المعرف، وأن البوت مضاف كمشرف فيها."
-        )
+        bot.send_message(cid, "❌ خطأ في التحقق من القناة! تأكد من صحة المعرف وأن البوت مشرف فيها.")
 
 def process_remove_channel(message):
     ch = message.text.strip()
@@ -1323,7 +1388,7 @@ def handle_dynamic_btn_edit_input(message):
     clear_state(uid)
     
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 العودة للوحة تحكم الزر", callback_data=f"adm_edit_{btn_id}"))
+    markup.add(types.InlineKeyboardButton("🔙 العودة لقائمة إعدادات الخدمات", callback_data="adm_settings_list"))
     
     bot.send_message(
         cid,
@@ -1332,7 +1397,7 @@ def handle_dynamic_btn_edit_input(message):
         f"• التعديل المحدث: {edit_key}\n"
         f"• القيمة الجديدة: {new_value}",
         reply_markup=markup,
-        parse_mode="Markdown"
+        parse_Mode="Markdown"
     )
 
 
