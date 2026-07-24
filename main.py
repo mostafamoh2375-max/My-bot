@@ -173,7 +173,8 @@ def register_user_points(user_id, name=""):
             "points": 0, 
             "unlocked": [],
             "referred_by": None,
-            "referral_rewarded": False
+            "referral_rewarded": False,
+            "referrals_count": 0
         }
         save_users(data)
     else:
@@ -192,6 +193,9 @@ def register_user_points(user_id, name=""):
             changed = True
         if "referral_rewarded" not in data["users"][uid]:
             data["users"][uid]["referral_rewarded"] = False
+            changed = True
+        if "referrals_count" not in data["users"][uid]:
+            data["users"][uid]["referrals_count"] = 0
             changed = True
         if changed:
             save_users(data)
@@ -258,6 +262,7 @@ def process_referral_reward(user_id):
         if referrer_rec:
             ref_points = db.get("ref_points", 2)
             referrer_rec["points"] = referrer_rec.get("points", 0) + ref_points
+            referrer_rec["referrals_count"] = referrer_rec.get("referrals_count", 0) + 1
             user_rec["referral_rewarded"] = True
             save_users(users_data)
             
@@ -815,15 +820,37 @@ def callback(call):
             except Exception:
                 bot_username = "Bot"
             ref_link = f"https://t.me/{bot_username}?start=ref_{uid}"
-            db = load_db()
-            ref_pts = db.get("ref_points", 2)
-            bot.send_message(
-                cid,
-                f"🔗 **رابط الإحالة الخاص بك:**\n\n"
-                f"`{ref_link}`\n\n"
-                f"📌 قم بنشر هذا الرابط لأصدقائك وعندما يدخل أي شخص جديد للبوت ويشترك في القنوات المطلوبة، ستحصل تلقائياً على **{ref_pts}** نقطة في رصيدك!",
-                parse_mode="Markdown"
+            
+            users_data = load_users()
+            uid_str = str(uid)
+            user_rec = users_data["users"].get(uid_str, {})
+            my_invites = user_rec.get("referrals_count", 0)
+            
+            all_users = users_data.get("users", {})
+            sorted_users = sorted(
+                all_users.items(), 
+                key=lambda item: item[1].get("referrals_count", 0), 
+                reverse=True
             )
+            top_5 = sorted_users[:5]
+            
+            medals = ["🥇", "🥈", "🥉", "🎖", "🎖"]
+            top_lines = []
+            for idx, (u_id, u_info) in enumerate(top_5):
+                count = u_info.get("referrals_count", 0)
+                medal = medals[idx] if idx < len(medals) else "🏅"
+                top_lines.append(f"{medal} : ({count}) -> {u_id}")
+            
+            top_text = "\n".join(top_lines) if top_lines else "لا يوجد مستخدمون بعد."
+            
+            ref_msg = (
+                f"رابط الدعوة ( {ref_link} )\n\n"
+                f"عدد دعوتك ( {my_invites} )\n\n"
+                f"افضل توب 5 بعدد دعوات\n"
+                f"{top_text}"
+            )
+            
+            bot.send_message(cid, ref_msg)
             return
 
         if data == "change_sub_name":
