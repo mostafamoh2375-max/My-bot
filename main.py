@@ -75,6 +75,7 @@ WAIT_BAN = "WAIT_BAN"
 WAIT_UNBAN = "WAIT_UNBAN"
 WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
 WAIT_REF_NAME = "WAIT_REF_NAME"
+WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
 
@@ -114,7 +115,10 @@ def load_db():
             "sub_channels": REQUIRED_CHANNELS.copy(),
             "ref_active": True,
             "ref_points": 2,
-            "ref_name": "نظام الإحالة"
+            "ref_name": "نظام الإحالة",
+            "welcome_active": True,
+            "welcome_points": 1,
+            "welcome_name": "مكافأة التسجيل"
         }
         save_db(default)
         return default
@@ -131,6 +135,9 @@ def load_db():
     data.setdefault("ref_active", True)
     data.setdefault("ref_points", 2)
     data.setdefault("ref_name", "نظام الإحالة")
+    data.setdefault("welcome_active", True)
+    data.setdefault("welcome_points", 1)
+    data.setdefault("welcome_name", "مكافأة التسجيل")
     return data
 
 
@@ -174,7 +181,8 @@ def register_user_points(user_id, name=""):
             "unlocked": [],
             "referred_by": None,
             "referral_rewarded": False,
-            "referrals_count": 0
+            "referrals_count": 0,
+            "welcome_bonus_received": False
         }
         save_users(data)
     else:
@@ -196,6 +204,9 @@ def register_user_points(user_id, name=""):
             changed = True
         if "referrals_count" not in data["users"][uid]:
             data["users"][uid]["referrals_count"] = 0
+            changed = True
+        if "welcome_bonus_received" not in data["users"][uid]:
+            data["users"][uid]["welcome_bonus_received"] = False
             changed = True
         if changed:
             save_users(data)
@@ -236,6 +247,29 @@ def build_sub_markup(missing_channels):
         )
     )
     return markup
+
+
+# ── Welcome Bonus Processor ─────────────────────────────────────
+
+def process_welcome_bonus(user_id):
+    db = load_db()
+    if not db.get("welcome_active", True):
+        return 0
+    
+    users_data = load_users()
+    uid_str = str(user_id)
+    user_rec = users_data["users"].get(uid_str)
+    
+    if not user_rec:
+        return 0
+        
+    if not user_rec.get("welcome_bonus_received", False):
+        welcome_pts = db.get("welcome_points", 1)
+        user_rec["points"] = user_rec.get("points", 0) + welcome_pts
+        user_rec["welcome_bonus_received"] = True
+        save_users(users_data)
+        return welcome_pts
+    return 0
 
 
 # ── Referral Reward Processor ───────────────────────────────────
@@ -517,19 +551,25 @@ def start(message):
             )
             return
 
+    # Grant welcome bonus and referral reward if passing directly
+    bonus_given = process_welcome_bonus(u.id)
     process_referral_reward(u.id)
 
     db = load_db()
+    welcome_msg = "أهلاً بك في متجري! اختر من القائمة:"
+    if bonus_given > 0:
+        welcome_msg = f"🎉 أهلاً بك! لقد حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة).\n\nأهلاً بك في متجري! اختر من القائمة:"
+
     if get_children(db, None):
         bot.send_message(
             message.chat.id,
-            "أهلاً بك في متجري! اختر من القائمة:",
+            welcome_msg,
             reply_markup=build_nav_markup(db, None),
         )
     else:
         bot.send_message(
             message.chat.id,
-            "أهلاً بك! القائمة فارغة حالياً.\nتواصل مع الإدارة أو انتظر إضافة الخدمات.",
+            welcome_msg + "\nالقائمة فارغة حالياً.",
         )
 
 
@@ -541,6 +581,7 @@ def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
     markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
+    markup.add(types.InlineKeyboardButton("⭐ إعدادات مكافأة التسجيل", callback_data="adm_feat_welcome"))
     markup.add(types.InlineKeyboardButton("🔗 إعدادات ميزة الإحالات", callback_data="adm_feat_ref"))
     markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
     markup.add(types.InlineKeyboardButton("🔒 قفل الخدمات بنقاط", callback_data="adm_lock_menu"))
@@ -748,6 +789,70 @@ def callback(call):
             except:
                 pass
             bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
+            return
+
+        # ── إعدادات مكافأة التسجيل (Welcome Bonus Settings) ──
+        if data == "adm_feat_welcome":
+            db = load_db()
+            wel_pts = db.get("welcome_points", 1)
+            wel_name = db.get("welcome_name", "مكافأة التسجيل")
+            wel_st = "مفعل ✅" if db.get("welcome_active", True) else "معطل ❌"
+            
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("✏️ تعديل عدد نقاط التسجيل", callback_data="edit_welcome_points_val"),
+                types.InlineKeyboardButton("👁 معرفة النقاط الحالية", callback_data="show_welcome_points")
+            )
+            markup.add(
+                types.InlineKeyboardButton("📝 تغيير اسم الخدمة", callback_data="edit_welcome_name"),
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف الخدمة", callback_data="toggle_welcome_status")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                f"⚙️ إعدادات مكافأة التسجيل لأول مرة:\n\n"
+                f"• اسم الخدمة: {wel_name}\n"
+                f"• الحالة: {wel_st}\n"
+                f"• النقاط لكل مستخدم جديد: {wel_pts}\n\n"
+                f"اختر ما تريد تعديله:", 
+                cid, mid, reply_markup=markup
+            )
+            return
+
+        if data == "show_welcome_points":
+            db = load_db()
+            pts = db.get("welcome_points", 1)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_welcome"))
+            bot.edit_message_text(f"⭐ عدد النقاط الممنوح للمستخدم الجديد عند التسجيل لأول مرة هو: **{pts}** نقطة.", cid, mid, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        if data == "edit_welcome_points_val":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_welcome"))
+            msg = bot.edit_message_text("✍️ أرسل الآن عدد نقاط مكافأة التسجيل الجديد (برقم صحيح):", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_welcome_points)
+            return
+
+        if data == "edit_welcome_name":
+            set_state(uid, WAIT_WELCOME_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_welcome"))
+            try:
+                bot.delete_message(cid, mid)
+            except:
+                pass
+            bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد لمكافأة التسجيل:", reply_markup=markup)
+            return
+
+        if data == "toggle_welcome_status":
+            db = load_db()
+            current_status = db.get("welcome_active", True)
+            db["welcome_active"] = not current_status
+            save_db(db)
+            status_text = "مفعلة ✅" if db["welcome_active"] else "معطلة ❌"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_welcome"))
+            bot.edit_message_text(f"🔄 تم تغيير حالة مكافأة التسجيل بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
             return
 
         # ── إعدادات ميزة الإحالات في لوحة التحكم ──
@@ -1084,16 +1189,23 @@ def callback(call):
                 except Exception:
                     pass
                 
+                # Grant welcome bonus and referral reward upon successful verification
+                bonus_given = process_welcome_bonus(uid)
                 process_referral_reward(uid)
-                    
+                
+                nav_text = "✅ تم التحقق من اشتراكك في القنوات بنجاح!\n"
+                if bonus_given > 0:
+                    nav_text += f"🎁 حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)!\n"
+                nav_text += "أهلاً بك في متجري! اختر من القائمة:"
+                
                 if get_children(db, None):
                     bot.send_message(
                         cid,
-                        "✅ تم التحقق من اشتراكك في القنوات بنجاح!\nأهلاً بك في متجري! اختر من القائمة:",
+                        nav_text,
                         reply_markup=build_nav_markup(db, None),
                     )
                 else:
-                    bot.send_message(cid, "✅ تم التحقق من اشتراكك في القنوات بنجاح! أهلاً بك! القائمة فارغة حالياً.")
+                    bot.send_message(cid, nav_text + "\nالقائمة فارغة حالياً.")
             return
 
         if uid != ADMIN_ID:
@@ -1459,6 +1571,26 @@ def handle_state(message):
         )
         return
 
+    elif state == WAIT_WELCOME_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل الاسم كنص من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        db["welcome_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات مكافأة التسجيل", callback_data="adm_feat_welcome"))
+        bot.send_message(
+            cid, 
+            f"✅ **تم تغيير اسم خدمة مكافأة التسجيل بنجاح!**\n\n• الاسم الجديد: {new_name}", 
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+
     elif state == WAIT_REF_NAME:
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل الاسم كنص من فضلك.")
@@ -1583,6 +1715,17 @@ def save_new_gift_points(message):
         db["gift_points"] = new_pts
         save_db(db)
         bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الهدية اليومية بنجاح إلى: {new_pts} نقطة.")
+    except ValueError:
+        bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+
+
+def save_new_welcome_points(message):
+    try:
+        new_pts = int(message.text.strip())
+        db = load_db()
+        db["welcome_points"] = new_pts
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط مكافأة التسجيل بنجاح إلى: {new_pts} نقطة.")
     except ValueError:
         bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
 
