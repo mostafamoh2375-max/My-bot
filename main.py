@@ -74,6 +74,7 @@ WAIT_BROADCAST = "WAIT_BROADCAST"
 WAIT_BAN = "WAIT_BAN"
 WAIT_UNBAN = "WAIT_UNBAN"
 WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
+WAIT_REF_NAME = "WAIT_REF_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
 
@@ -102,7 +103,19 @@ def get_data(uid):
 
 def load_db():
     if not os.path.exists(DB_FILE):
-        default = {"buttons": [], "users": [], "banned_users": [], "gift_points": 2, "gift_name": "الهدية اليومية", "sub_active": True, "sub_channels": REQUIRED_CHANNELS.copy()}
+        default = {
+            "buttons": [], 
+            "users": [], 
+            "banned_users": [], 
+            "gift_points": 2, 
+            "gift_name": "الهدية اليومية", 
+            "gift_active": True,
+            "sub_active": True, 
+            "sub_channels": REQUIRED_CHANNELS.copy(),
+            "ref_active": True,
+            "ref_points": 2,
+            "ref_name": "نظام الإحالة"
+        }
         save_db(default)
         return default
     with open(DB_FILE, "r", encoding="utf-8") as f:
@@ -112,8 +125,12 @@ def load_db():
     data.setdefault("banned_users", [])
     data.setdefault("gift_points", 2)
     data.setdefault("gift_name", "الهدية اليومية")
+    data.setdefault("gift_active", True)
     data.setdefault("sub_active", True)
     data.setdefault("sub_channels", REQUIRED_CHANNELS.copy())
+    data.setdefault("ref_active", True)
+    data.setdefault("ref_points", 2)
+    data.setdefault("ref_name", "نظام الإحالة")
     return data
 
 
@@ -151,7 +168,13 @@ def register_user_points(user_id, name=""):
     data = load_users()
     uid = str(user_id)
     if uid not in data["users"]:
-        data["users"][uid] = {"name": name, "points": 0, "unlocked": []}
+        data["users"][uid] = {
+            "name": name, 
+            "points": 0, 
+            "unlocked": [],
+            "referred_by": None,
+            "referral_rewarded": False
+        }
         save_users(data)
     else:
         changed = False
@@ -163,6 +186,12 @@ def register_user_points(user_id, name=""):
             changed = True
         if "unlocked" not in data["users"][uid]:
             data["users"][uid]["unlocked"] = []
+            changed = True
+        if "referred_by" not in data["users"][uid]:
+            data["users"][uid]["referred_by"] = None
+            changed = True
+        if "referral_rewarded" not in data["users"][uid]:
+            data["users"][uid]["referral_rewarded"] = False
             changed = True
         if changed:
             save_users(data)
@@ -189,7 +218,6 @@ def check_subscription(user_id):
 
 
 def build_sub_markup(missing_channels):
-    """إنشاء أزرار القنوات التي لم يشتراك بها المستخدم + زر التحقق"""
     markup = types.InlineKeyboardMarkup()
     for ch in missing_channels:
         ch_clean = ch.replace("@", "")
@@ -204,6 +232,45 @@ def build_sub_markup(missing_channels):
         )
     )
     return markup
+
+
+# ── Referral Reward Processor ───────────────────────────────────
+
+def process_referral_reward(user_id):
+    db = load_db()
+    if not db.get("ref_active", True):
+        return
+    
+    users_data = load_users()
+    uid_str = str(user_id)
+    user_rec = users_data["users"].get(uid_str)
+    
+    if not user_rec:
+        return
+        
+    referrer_id = user_rec.get("referred_by")
+    rewarded = user_rec.get("referral_rewarded", False)
+    
+    if referrer_id and not rewarded:
+        ref_id_str = str(referrer_id)
+        referrer_rec = users_data["users"].get(ref_id_str)
+        
+        if referrer_rec:
+            ref_points = db.get("ref_points", 2)
+            referrer_rec["points"] = referrer_rec.get("points", 0) + ref_points
+            user_rec["referral_rewarded"] = True
+            save_users(users_data)
+            
+            ref_name = db.get("ref_name", "نظام الإحالة")
+            try:
+                bot.send_message(
+                    int(referrer_id),
+                    f"🎉 **مبروك!** دخل مستخدم جديد برقم تعريف (`{user_id}`) إلى البوت عبر رابط إحالتك واجتاز التحقق بنجاح.\n"
+                    f"لقد حصلت على مكافأة قدرها **{ref_points}** نقطة من ({ref_name})! 🌟",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.exception("Failed to notify referrer %s: %s", referrer_id, e)
 
 
 # ── Daily gift (Dynamic from DB) ────────────────────────────────
@@ -327,14 +394,13 @@ def send_content(cid, btn, back_markup):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  NAVIGATION MARKUP (عرض الأزرار في جهتين / عمودين)
+#  NAVIGATION MARKUP
 # ═══════════════════════════════════════════════════════════════
 
 def build_nav_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     
-    # تقسيم الأزرار في صفوف ثنائية (جهتين بجانب بعضهما)
     for i in range(0, len(children), 2):
         row_buttons = []
         for btn in children[i:i+2]:
@@ -356,8 +422,10 @@ def build_nav_markup(db, parent_id=None):
     else:
         db_data = load_db()
         gift_name = db_data.get("gift_name", "الهدية اليومية")
+        ref_name = db_data.get("ref_name", "رابط الإحالة")
         markup.add(
-            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim")
+            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
+            types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info")
         )
     return markup
 
@@ -374,14 +442,13 @@ def back_only_markup(btn):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR (عرض في جهتين أيضاً)
+#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR
 # ═══════════════════════════════════════════════════════════════
 
 def build_admin_settings_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
     
-    # تقسيم الأزرار في صفوف ثنائية (جهتين)
     for i in range(0, len(children), 2):
         row_buttons = []
         for btn in children[i:i+2]:
@@ -415,8 +482,23 @@ def start(message):
     clear_state(message.from_user.id)
     register_user(message.from_user.id)
     u = message.from_user
+    uid_str = str(u.id)
     name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or ""
+
+    args = message.text.split()
+    is_new = uid_str not in load_users()["users"] or not load_users()["users"][uid_str].get("name")
+    
     register_user_points(u.id, name)
+
+    if len(args) > 1 and args[1].startswith("ref_") and is_new:
+        try:
+            ref_id = int(args[1].replace("ref_", ""))
+            if ref_id != u.id:
+                users_data = load_users()
+                users_data["users"][uid_str]["referred_by"] = ref_id
+                save_users(users_data)
+        except Exception as e:
+            logger.exception("Error parsing referral in start: %s", e)
 
     if u.id != ADMIN_ID:
         missing = check_subscription(u.id)
@@ -429,6 +511,8 @@ def start(message):
                 reply_markup=markup,
             )
             return
+
+    process_referral_reward(u.id)
 
     db = load_db()
     if get_children(db, None):
@@ -452,6 +536,7 @@ def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
     markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
+    markup.add(types.InlineKeyboardButton("🔗 إعدادات ميزة الإحالات", callback_data="adm_feat_ref"))
     markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
     markup.add(types.InlineKeyboardButton("🔒 قفل الخدمات بنقاط", callback_data="adm_lock_menu"))
     markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"), types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
@@ -554,7 +639,6 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
-        # ─── معالجة زر إعدادات الخدمات والأزرار الشامل ───
         if data == "adm_settings_list" or data == "admin_buttons_list":
             db = load_db()
             markup = build_admin_settings_markup(db, None)
@@ -661,6 +745,87 @@ def callback(call):
             bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
             return
 
+        # ── إعدادات ميزة الإحالات في لوحة التحكم ──
+        if data == "adm_feat_ref":
+            db = load_db()
+            ref_pts = db.get("ref_points", 2)
+            ref_name = db.get("ref_name", "نظام الإحالة")
+            ref_st = "مفعل ✅" if db.get("ref_active", True) else "معطل ❌"
+            
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("✏️ تعديل عدد نقاط الإحالة", callback_data="edit_ref_points_val"),
+                types.InlineKeyboardButton("👁 معرفة النقاط الحالية", callback_data="show_ref_points")
+            )
+            markup.add(
+                types.InlineKeyboardButton("📝 تغيير اسم الخدمة", callback_data="edit_ref_name"),
+                types.InlineKeyboardButton("🔄 تفعيل/إيقاف الخدمة", callback_data="toggle_ref_status")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                f"⚙️ إعدادات ميزة الإحالات المتقدمة:\n\n"
+                f"• اسم الخدمة: {ref_name}\n"
+                f"• الحالة: {ref_st}\n"
+                f"• النقاط لكل إحالة: {ref_pts}\n\n"
+                f"اختر ما تريد تعديله:", 
+                cid, mid, reply_markup=markup
+            )
+            return
+
+        if data == "show_ref_points":
+            db = load_db()
+            pts = db.get("ref_points", 2)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_ref"))
+            bot.edit_message_text(f"🔗 عدد النقاط الممنوح لكل إحالة ناجحة هو: **{pts}** نقطة.", cid, mid, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        if data == "edit_ref_points_val":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_ref"))
+            msg = bot.edit_message_text("✍️ أرسل الآن عدد نقاط الإحالة الجديد (برقم صحيح):", cid, mid, reply_markup=markup)
+            bot.register_next_step_handler(msg, save_new_ref_points)
+            return
+            
+        if data == "edit_ref_name":
+            set_state(uid, WAIT_REF_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_ref"))
+            try:
+                bot.delete_message(cid, mid)
+            except:
+                pass
+            bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد لميزة الإحالات:", reply_markup=markup)
+            return
+
+        if data == "toggle_ref_status":
+            db = load_db()
+            current_status = db.get("ref_active", True)
+            db["ref_active"] = not current_status
+            save_db(db)
+            status_text = "مفعلة ✅" if db["ref_active"] else "معطلة ❌"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_feat_ref"))
+            bot.edit_message_text(f"🔄 تم تغيير حالة ميزة الإحالة بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
+            return
+
+        if data == "ref_link_info":
+            try:
+                bot_username = bot.get_me().username
+            except Exception:
+                bot_username = "Bot"
+            ref_link = f"https://t.me/{bot_username}?start=ref_{uid}"
+            db = load_db()
+            ref_pts = db.get("ref_points", 2)
+            bot.send_message(
+                cid,
+                f"🔗 **رابط الإحالة الخاص بك:**\n\n"
+                f"`{ref_link}`\n\n"
+                f"📌 قم بنشر هذا الرابط لأصدقائك وعندما يدخل أي شخص جديد للبوت ويشترك في القنوات المطلوبة، ستحصل تلقائياً على **{ref_pts}** نقطة في رصيدك!",
+                parse_mode="Markdown"
+            )
+            return
+
         if data == "change_sub_name":
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_feat_sub"))
@@ -742,7 +907,6 @@ def callback(call):
             bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
             return
 
-        # الدفع مقابل الأزرار المدفوعة
         if data.startswith("pay_"):
             btn_id = data[len("pay_"):]
             db = load_db()
@@ -766,7 +930,7 @@ def callback(call):
                     f"• رصيدك الحالي: **{current_pts}** نقطة\n"
                     f"• التكلفة المطلوبة: **{unlock_pts}** نقطة\n"
                     f"• النقاط المفقودة: **{max(0, unlock_pts - current_pts)}** نقطة\n\n"
-                    f"🎁 يمكنك جمع النقاط عبر استخدام (الهدية اليومية) من القائمة الرئيسية.",
+                    f"🎁 يمكنك جمع النقاط عبر استخدام (الهدية اليومية) أو (رابط الإحالة) من القائمة الرئيسية.",
                     parse_mode="Markdown"
                 )
                 return
@@ -892,6 +1056,8 @@ def callback(call):
                     bot.delete_message(cid, mid)
                 except Exception:
                     pass
+                
+                process_referral_reward(uid)
                     
                 if get_children(db, None):
                     bot.send_message(
@@ -903,7 +1069,6 @@ def callback(call):
                     bot.send_message(cid, "✅ تم التحقق من اشتراكك في القنوات بنجاح! أهلاً بك! القائمة فارغة حالياً.")
             return
 
-        # ─── منطقة صلاحيات الإدارة ───
         if uid != ADMIN_ID:
             return
 
@@ -1071,7 +1236,7 @@ def callback(call):
                 if b["id"] not in descendants and b["id"] != btn_id
             ]
             save_db(db)
-            extra = f" و{total} زر فرعي" if total else ""
+            extra = f" وو {total} زر فرعي" if total else ""
             bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
 
         elif data == "adm_users":
@@ -1266,6 +1431,26 @@ def handle_state(message):
             parse_mode="Markdown"
         )
         return
+
+    elif state == WAIT_REF_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل الاسم كنص من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        db["ref_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الإحالة", callback_data="adm_feat_ref"))
+        bot.send_message(
+            cid, 
+            f"✅ **تم تغيير اسم خدمة الإحالة بنجاح!**\n\n• الاسم الجديد: {new_name}", 
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
     
     elif state == "WAIT_DYNAMIC_BTN_EDIT":
         if message.content_type != "text":
@@ -1374,6 +1559,18 @@ def save_new_gift_points(message):
     except ValueError:
         bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
 
+
+def save_new_ref_points(message):
+    try:
+        new_pts = int(message.text.strip())
+        db = load_db()
+        db["ref_points"] = new_pts
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الإحالة بنجاح إلى: {new_pts} نقطة.")
+    except ValueError:
+        bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+
+
 def save_new_sub_name(message):
     new_name = message.text.strip()
     db = load_db()
@@ -1455,4 +1652,3 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
-            
