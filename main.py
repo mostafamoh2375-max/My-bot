@@ -102,7 +102,7 @@ def get_data(uid):
 
 def load_db():
     if not os.path.exists(DB_FILE):
-        default = {"buttons": [], "users": [], "banned_users": [], "gift_points": 2, "gift_name": "الهدية اليومية", "sub_active": True}
+        default = {"buttons": [], "users": [], "banned_users": [], "gift_points": 2, "gift_name": "الهدية اليومية", "sub_active": True, "sub_channels": REQUIRED_CHANNELS.copy()}
         save_db(default)
         return default
     with open(DB_FILE, "r", encoding="utf-8") as f:
@@ -113,6 +113,7 @@ def load_db():
     data.setdefault("gift_points", 2)
     data.setdefault("gift_name", "الهدية اليومية")
     data.setdefault("sub_active", True)
+    data.setdefault("sub_channels", REQUIRED_CHANNELS.copy())
     return data
 
 
@@ -185,6 +186,24 @@ def check_subscription(user_id):
             logger.exception("check_subscription failed for %s: %s", channel, e)
             not_subscribed.append(channel)
     return not_subscribed
+
+
+def build_sub_markup(missing_channels):
+    """إنشاء أزرار القنوات التي لم يشتراك بها المستخدم + زر التحقق"""
+    markup = types.InlineKeyboardMarkup()
+    for ch in missing_channels:
+        ch_clean = ch.replace("@", "")
+        markup.add(
+            types.InlineKeyboardButton(
+                f"📢 اشترك في قناة {ch}", url=f"https://t.me/{ch_clean}"
+            )
+        )
+    markup.add(
+        types.InlineKeyboardButton(
+            "✅ تحقق من الاشتراك", callback_data="sub_check"
+        )
+    )
+    return markup
 
 
 # ── Daily gift (Dynamic from DB) ────────────────────────────────
@@ -402,16 +421,11 @@ def start(message):
     if u.id != ADMIN_ID:
         missing = check_subscription(u.id)
         if missing:
-            markup = types.InlineKeyboardMarkup()
-            markup.add(
-                types.InlineKeyboardButton(
-                    "✅ تحقق من الاشتراك", callback_data="sub_check"
-                )
-            )
+            markup = build_sub_markup(missing)
             bot.send_message(
                 message.chat.id,
                 "⚠️ يجب عليك الاشتراك في قنواتنا لاستخدام البوت.\n"
-                "اشترك ثم أرسل /start أو اضغط الزر أدناه للتحقق.",
+                "اشترك في القنوات أدناه ثم اضغط زر التحقق:",
                 reply_markup=markup,
             )
             return
@@ -742,8 +756,19 @@ def callback(call):
             uid_str = str(uid)
             user = users_db["users"].get(uid_str)
             
-            if not user or user.get("points", 0) < unlock_pts:
-                bot.answer_callback_query(call.id, f"❌ رصيد نقاطك غير كافٍ!\nتحتاج إلى {unlock_pts} نقطة لفتح هذه الخدمة.", show_alert=True)
+            current_pts = user.get("points", 0) if user else 0
+            if not user or current_pts < unlock_pts:
+                bot.answer_callback_query(call.id, f"❌ رصيد نقاطك غير كافٍ!\nرصيدك: {current_pts} | تحتاج: {unlock_pts}", show_alert=True)
+                bot.send_message(
+                    cid, 
+                    f"❌ **عذراً، تعذر فتح الخدمة لعدم كفاية النقاط!**\n\n"
+                    f"• اسم الخدمة: {btn.get('name', 'الخدمة')}\n"
+                    f"• رصيدك الحالي: **{current_pts}** نقطة\n"
+                    f"• التكلفة المطلوبة: **{unlock_pts}** نقطة\n"
+                    f"• النقاط المفقودة: **{max(0, unlock_pts - current_pts)}** نقطة\n\n"
+                    f"🎁 يمكنك جمع النقاط عبر استخدام (الهدية اليومية) من القائمة الرئيسية.",
+                    parse_mode="Markdown"
+                )
                 return
                 
             user["points"] -= unlock_pts
@@ -840,32 +865,42 @@ def callback(call):
 
         if data == "sub_check":
             db = load_db()
-            if not db.get("sub_active", True) or not REQUIRED_CHANNELS:
+            if not db.get("sub_active", True) or not db.get("sub_channels", REQUIRED_CHANNELS):
                 bot.send_message(cid, "✅ لا توجد قنوات مطلوبة حالياً.")
                 return
+            
             missing = check_subscription(uid)
             if missing:
-                markup = types.InlineKeyboardMarkup()
-                markup.add(
-                    types.InlineKeyboardButton(
-                        "✅ تحقق من الاشتراك", callback_data="sub_check"
+                markup = build_sub_markup(missing)
+                try:
+                    bot.edit_message_text(
+                        "❌ لم تشترك في جميع القنوات المطلوبة بعد.\n"
+                        "اشترك في القنوات أدناه ثم اضغط زر التحقق مجدداً:",
+                        cid,
+                        mid,
+                        reply_markup=markup
                     )
-                )
-                bot.send_message(
-                    cid,
-                    "❌ لم تشترك في جميع القنوات المطلوبة بعد.\n"
-                    "اشترك ثم اضغط زر التحقق مجدداً أو أرسل /start.",
-                    reply_markup=markup,
-                )
+                except Exception:
+                    bot.send_message(
+                        cid,
+                        "❌ لم تشترك في جميع القنوات المطلوبة بعد.\n"
+                        "اشترك في القنوات أدناه ثم اضغط زر التحقق مجدداً:",
+                        reply_markup=markup,
+                    )
             else:
+                try:
+                    bot.delete_message(cid, mid)
+                except Exception:
+                    pass
+                    
                 if get_children(db, None):
                     bot.send_message(
                         cid,
-                        "✅ تم التحقق! أهلاً بك في متجري! اختر من القائمة:",
+                        "✅ تم التحقق من اشتراكك في القنوات بنجاح!\nأهلاً بك في متجري! اختر من القائمة:",
                         reply_markup=build_nav_markup(db, None),
                     )
                 else:
-                    bot.send_message(cid, "✅ تم التحقق! أهلاً بك! القائمة فارغة حالياً.")
+                    bot.send_message(cid, "✅ تم التحقق من اشتراكك في القنوات بنجاح! أهلاً بك! القائمة فارغة حالياً.")
             return
 
         # ─── منطقة صلاحيات الإدارة ───
@@ -1420,3 +1455,4 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
+            
