@@ -107,7 +107,7 @@ import telebot
 from telebot import types
 
 # ==================== إعدادات اتصال MongoDB Atlas ====================
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://mostafamoh2375_db_user:0ifWoPp7a0cynuI1@cluster0.rxdqdlv.mongodb.net/?appName=Cluster0")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://mostafamoh2375_db_user:MKSybnr160hjilGEv7MZG@cluster0.rxdqdlv.mongodb.net/mostafamoh2375_db_user?appName=Cluster0")
 client = MongoClient(MONGO_URI)
 mongo_db = client["telegram_bot_db"]
 config_collection = mongo_db["config"]
