@@ -6,76 +6,195 @@ import logging
 from flask import Flask
 from threading import Thread
 from pymongo import MongoClient
+
+# 1. الاتصال بقاعدة البيانات
+client = MongoClient(
+    "mongodb+srv://mostafamoh2375_db_user:MKSybnr160hjilGEv7MZG@cluster0.rxdqdlv.mongodb.net/mostafamoh2375_db_user?appName=Cluster0"
+)
+db = client.get_database()
+
+# 2. إدخال الأزرار تلقائياً إذا كانت القاعدة فارغة
+if db.buttons.count_documents({}) == 0:
+  buttons_data = [
+      {
+          "id": "7787b22b",
+          "name": "خدمة التطبيقات 🛍",
+          "content": "تطبيقات سلملي",
+          "parent_id": None,
+      },
+      {
+          "id": "4e8bda81",
+          "name": "تطبيقات المدفوعه",
+          "content_type": "document",
+          "content": (
+              "BQACAgQAAxkBAAIBCWpW_bw_UISLUE6NdyVPccJng7Q9AAI4GgACunW4UlmUx04MM8hLPQQ"
+          ),
+          "parent_id": "7787b22b",
+          "password": "",
+      },
+      {
+          "id": "48536625",
+          "name": "📩 الشكاوي",
+          "content_type": "text",
+          "content": (
+              "📩 الشكاوي والمقترحات\n\nمن فضلك أخبرنا بالمشكلة 😞\nأو اقترح"
+              " تعديلاً لتحسين البوت ❤️\n\n(يمكنك إرسال نص / صورة / صوت / فيديو /"
+              " ملف)"
+          ),
+          "parent_id": None,
+          "password": "",
+      },
+      {
+          "id": "65baee1a",
+          "name": "🔰مالك البوت",
+          "content_type": "text",
+          "content": "@Y_S_KK",
+          "parent_id": None,
+          "password": "",
+      },
+      {
+          "id": "8d0e6f86",
+          "name": "جديد",
+          "content_type": "text",
+          "content": (
+              "البوت تحت الصيانه ⚠ || سيتم تحديث خدمات البوت في اقرب وقت شكرا"
+              " لتفهمكم"
+          ),
+          "parent_id": None,
+          "password": "",
+      },
+  ]
+  db.buttons.insert_many(buttons_data)
+
+# 3. إعدادات القنوات والمشرفين
+if db.settings.count_documents({"_id": "config"}) == 0:
+  db.settings.update_one(
+      {"_id": "config"},
+      {
+          "$set": {
+              "required_channels": ["@Salemly_1", "@shr_llh"],
+              "admins": [8097008430],
+          }
+      },
+      upsert=True,
+  )
+
+# 4. إدخال بيانات المستخدم والنقاط
+if db.users.count_documents({"_id": "users_dict"}) == 0:
+  users_data = {
+      "8097008430": {
+          "name": "مصطفى شخصيه خياليه",
+          "points": 2,
+          "last_gift": 1784096431.0477734,
+      }
+  }
+  db.users.insert_one({"_id": "users_dict", "data": users_data})
+
+# ==================== إعداد خادم Flask للبقاء حياً على Render ====================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and connected to MongoDB Atlas"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+t = Thread(target=run)
+t.start()
+
 import telebot
 from telebot import types
 
 # ==================== إعدادات اتصال MongoDB Atlas ====================
-MONGO_URI = os.environ.get(
-    "MONGO_URI",
-    "mongodb+srv://mostafamoh2375_db_user:MKSybnr160hjilGEv7MZG@cluster0.rxdqdlv.mongodb.net/mostafamoh2375_db_user?appName=Cluster0"
-)
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://mostafamoh2375_db_user:MKSybnr160hjilGEv7MZG@cluster0.rxdqdlv.mongodb.net/mostafamoh2375_db_user?appName=Cluster0")
 client = MongoClient(MONGO_URI)
-
-# توحيد قاعدة البيانات لتجنب الضياع بين قواعد بيانات متعددة
 mongo_db = client["telegram_bot_db"]
 config_collection = mongo_db["config"]
 users_collection = mongo_db["users_data"]
 
+# Bot token (required)
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
+
+if not TOKEN:
+    sys.stderr.write("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.\n")
+    raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
+
 # Admin Telegram ID (integer)
 ADMIN_ID = 8097008430
+
+# Create bot instance
+bot = telebot.TeleBot(TOKEN, threaded=True)
+
+# Logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def report_admin_error(exc: Exception, context: str = ""):
+    """Log exception and attempt to notify the admin with a short traceback."""
+    try:
+        logger.exception("Unhandled exception in %s: %s", context, exc)
+    except Exception:
+        pass
+    try:
+        bot.send_message(
+            ADMIN_ID,
+            f"⚠️ Error in bot ({context}):\n{type(exc).__name__}: {str(exc)[:300]}",
+        )
+    except Exception:
+        logger.exception("Failed to send error message to ADMIN_ID")
+
+# ── Force-subscribe channels ────────────────────────────────────
 REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
-# الإعدادات الافتراضية متضمنة الأزرار الأولية
+# ═══════════════════════════════════════════════════════════════
+#  STATE MACHINE
+# ═══════════════════════════════════════════════════════════════
+
+user_states = {}  # uid → state string
+user_data = {}  # uid → dict of temporary data
+
+WAIT_BTN_NAME = "WAIT_BTN_NAME"
+WAIT_BTN_CONTENT = "WAIT_BTN_CONTENT"
+WAIT_BROADCAST = "WAIT_BROADCAST"
+WAIT_BAN = "WAIT_BAN"
+WAIT_UNBAN = "WAIT_UNBAN"
+WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
+WAIT_REF_NAME = "WAIT_REF_NAME"
+WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
+WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
+WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
+WAIT_USER_LOOKUP = "WAIT_USER_LOOKUP"
+WAIT_USER_POINTS_MODIFY = "WAIT_USER_POINTS_MODIFY"
+
+
+def set_state(uid, state, **data):
+    user_states[uid] = state
+    user_data[uid] = data
+
+
+def clear_state(uid):
+    user_states.pop(uid, None)
+    user_data.pop(uid, None)
+
+
+def get_state(uid):
+    return user_states.get(uid)
+
+
+def get_data(uid):
+    return user_data.get(uid, {})
+
+
+# ═══════════════════════════════════════════════════════════════
+#  DATABASE (MongoDB Adapters)[cite: 4]
+# ═══════════════════════════════════════════════════════════════
+
 DEFAULT_CONFIG = {
     "_id": "config",
-    "buttons": [
-        {
-            "id": "7787b22b",
-            "name": "خدمة التطبيقات 🛍",
-            "content": "تطبيقات سلملي",
-            "content_type": "text",
-            "parent_id": None,
-            "unlock_points": 0,
-            "unlock_desc": ""
-        },
-        {
-            "id": "4e8bda81",
-            "name": "تطبيقات المدفوعه",
-            "content_type": "document",
-            "content": "BQACAgQAAxkBAAIBCWpW_bw_UISLUE6NdyVPccJng7Q9AAI4GgACunW4UlmUx04MM8hLPQQ",
-            "parent_id": "7787b22b",
-            "unlock_points": 0,
-            "unlock_desc": ""
-        },
-        {
-            "id": "48536625",
-            "name": "📩 الشكاوي",
-            "content_type": "text",
-            "content": "📩 الشكاوي والمقترحات\n\nمن فضلك أخبرنا بالمشكلة 😞\nأو اقترح تعديلاً لتحسين البوت ❤️\n\n(يمكنك إرسال نص / صورة / صوت / فيديو / ملف)",
-            "parent_id": None,
-            "unlock_points": 0,
-            "unlock_desc": ""
-        },
-        {
-            "id": "65baee1a",
-            "name": "🔰مالك البوت",
-            "content_type": "text",
-            "content": "@Y_S_KK",
-            "parent_id": None,
-            "unlock_points": 0,
-            "unlock_desc": ""
-        },
-        {
-            "id": "8d0e6f86",
-            "name": "جديد",
-            "content_type": "text",
-            "content": "البوت تحت الصيانه ⚠ || سيتم تحديث خدمات البوت في اقرب وقت شكرا لتفهمكم",
-            "parent_id": None,
-            "unlock_points": 0,
-            "unlock_desc": ""
-        }
-    ], 
-    "users": [8097008430], 
+    "buttons": [], 
+    "users": [], 
     "banned_users": [], 
     "gift_points": 2, 
     "gift_name": "الهدية اليومية", 
@@ -108,107 +227,21 @@ def load_db():
     res.pop("_id", None)
     return res
 
+
 def save_db(data):
     data_to_save = dict(data)
     data_to_save["_id"] = "config"
     config_collection.replace_one({"_id": "config"}, data_to_save, upsert=True)
 
-# التأكد من وجود إعدادات البوت والمسؤول في قاعدة البيانات عند البدء
-load_db()
-
-# إدخال بيانات المشرف الافتراضية في جدول المستخدمين إذا كانت فارغة
-if users_collection.count_documents({"_id": "8097008430"}) == 0:
-    users_collection.insert_one({
-        "_id": "8097008430",
-        "name": "مصطفى شخصيه خياليه",
-        "points": 2,
-        "unlocked": [],
-        "referred_by": None,
-        "referral_rewarded": False,
-        "referrals_count": 0,
-        "welcome_bonus_received": True,
-        "last_gift": time.time()
-    })
-
-# ==================== إعداد خادم Flask للبقاء حياً على Render ====================
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive and connected to MongoDB Atlas"
-
-def run():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
-
-t = Thread(target=run)
-t.start()
-
-# Bot token (required)
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
-
-if not TOKEN:
-    sys.stderr.write("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.\n")
-    raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
-
-# Create bot instance
-bot = telebot.TeleBot(TOKEN, threaded=True)
-
-# Logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
-
-def report_admin_error(exc: Exception, context: str = ""):
-    """Log exception and attempt to notify the admin with a short traceback."""
-    try:
-        logger.exception("Unhandled exception in %s: %s", context, exc)
-    except Exception:
-        pass
-    try:
-        bot.send_message(
-            ADMIN_ID,
-            f"⚠️ Error in bot ({context}):\n{type(exc).__name__}: {str(exc)[:300]}",
-        )
-    except Exception:
-        logger.exception("Failed to send error message to ADMIN_ID")
-
-# ═══════════════════════════════════════════════════════════════
-#  STATE MACHINE & HELPERS
-# ═══════════════════════════════════════════════════════════════
-
-user_states = {}  # uid → state string
-user_data = {}  # uid → dict of temporary data
-
-WAIT_BTN_NAME = "WAIT_BTN_NAME"
-WAIT_BTN_CONTENT = "WAIT_BTN_CONTENT"
-WAIT_BROADCAST = "WAIT_BROADCAST"
-WAIT_BAN = "WAIT_BAN"
-WAIT_UNBAN = "WAIT_UNBAN"
-WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
-WAIT_REF_NAME = "WAIT_REF_NAME"
-WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
-WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
-WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
-
-def set_state(uid, state, **data):
-    user_states[uid] = state
-    user_data[uid] = data
-
-def clear_state(uid):
-    user_states.pop(uid, None)
-    user_data.pop(uid, None)
-
-def get_state(uid):
-    return user_states.get(uid)
-
-def get_data(uid):
-    return user_data.get(uid, {})
 
 def register_user(user_id):
     db = load_db()
     if user_id not in db["users"]:
         db["users"].append(user_id)
         save_db(db)
+
+
+# ── Points system (MongoDB collection for users) ────────────────
 
 def load_users():
     all_users = list(users_collection.find({}))
@@ -220,12 +253,14 @@ def load_users():
         users_dict[uid] = user_copy
     return {"users": users_dict}
 
+
 def save_users(data):
     users_map = data.get("users", {})
     for uid_str, u_data in users_map.items():
         doc = dict(u_data)
         doc["_id"] = str(uid_str)
         users_collection.replace_one({"_id": str(uid_str)}, doc, upsert=True)
+
 
 def register_user_points(user_id, name=""):
     data = load_users()
@@ -268,6 +303,9 @@ def register_user_points(user_id, name=""):
         if changed:
             save_users(data)
 
+
+# ── Force-subscribe check ───────────────────────────────────────
+
 def check_subscription(user_id):
     db = load_db()
     if not db.get("sub_active", True):
@@ -285,6 +323,7 @@ def check_subscription(user_id):
             not_subscribed.append(channel)
     return not_subscribed
 
+
 def build_sub_markup(missing_channels):
     markup = types.InlineKeyboardMarkup()
     for ch in missing_channels:
@@ -300,6 +339,9 @@ def build_sub_markup(missing_channels):
         )
     )
     return markup
+
+
+# ── Welcome Bonus Processor ─────────────────────────────────────
 
 def process_welcome_bonus(user_id):
     db = load_db()
@@ -320,6 +362,9 @@ def process_welcome_bonus(user_id):
         save_users(users_data)
         return welcome_pts
     return 0
+
+
+# ── Referral Reward Processor ───────────────────────────────────
 
 def process_referral_reward(user_id):
     db = load_db()
@@ -358,7 +403,11 @@ def process_referral_reward(user_id):
             except Exception as e:
                 logger.exception("Failed to notify referrer %s: %s", referrer_id, e)
 
+
+# ── Daily gift (Dynamic from DB) ────────────────────────────────
+
 GIFT_INTERVAL = 86400  # 24 hours in seconds
+
 
 def claim_daily_gift(user_id):
     users_data = load_users()
@@ -383,6 +432,7 @@ def claim_daily_gift(user_id):
         )
         
     current_gift_points = db.get("gift_points", 2)
+    
     user["points"] = user.get("points", 0) + current_gift_points
     user["last_gift"] = now
     save_users(users_data)
@@ -393,14 +443,17 @@ def claim_daily_gift(user_id):
         f"رصيدك الحالي: {user['points']} نقطة 🌟"
     )
 
+
 def get_button(db, btn_id):
     for btn in db["buttons"]:
         if btn.get("id") == btn_id:
             return btn
     return None
 
+
 def get_children(db, parent_id):
     return [b for b in db["buttons"] if b.get("parent_id") == parent_id]
+
 
 def collect_descendants(db, btn_id):
     result = set()
@@ -409,8 +462,14 @@ def collect_descendants(db, btn_id):
         result.update(collect_descendants(db, child["id"]))
     return result
 
+
 def new_id():
     return str(uuid.uuid4())[:8]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  CONTENT HELPERS
+# ═══════════════════════════════════════════════════════════════
 
 def extract_content(message):
     ct = message.content_type
@@ -430,6 +489,7 @@ def extract_content(message):
         return "sticker", message.sticker.file_id
     else:
         return "text", ""
+
 
 def send_content(cid, btn, back_markup):
     ct = btn.get("content_type", "text")
@@ -463,6 +523,11 @@ def send_content(cid, btn, back_markup):
     except Exception as e:
         report_admin_error(e, "send_content")
 
+
+# ═══════════════════════════════════════════════════════════════
+#  NAVIGATION MARKUP
+# ═══════════════════════════════════════════════════════════════
+
 def build_nav_markup(db, parent_id=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
@@ -495,6 +560,7 @@ def build_nav_markup(db, parent_id=None):
         )
     return markup
 
+
 def back_only_markup(btn):
     parent_id = btn.get("parent_id")
     markup = types.InlineKeyboardMarkup()
@@ -504,6 +570,11 @@ def back_only_markup(btn):
         )
     )
     return markup
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ADMIN SETTINGS HIERARCHICAL NAVIGATOR
+# ═══════════════════════════════════════════════════════════════
 
 def build_admin_settings_markup(db, parent_id=None):
     children = get_children(db, parent_id)
@@ -531,8 +602,9 @@ def build_admin_settings_markup(db, parent_id=None):
         markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
     return markup
 
+
 # ═══════════════════════════════════════════════════════════════
-#  BOT HANDLERS
+#  /start[cite: 4]
 # ═══════════════════════════════════════════════════════════════
 
 @bot.message_handler(commands=["start"])
@@ -591,9 +663,15 @@ def start(message):
             welcome_msg + "\nالقائمة فارغة حالياً.",
         )
 
+
+# ═══════════════════════════════════════════════════════════════
+#  /admin[cite: 4]
+# ═══════════════════════════════════════════════════════════════
+
 def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
+    markup.add(types.InlineKeyboardButton("📊 إحصائيات البوت", callback_data="adm_stats"))
     markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
     markup.add(types.InlineKeyboardButton("⭐ إعدادات مكافأة التسجيل", callback_data="adm_feat_welcome"))
     markup.add(types.InlineKeyboardButton("🔗 إعدادات ميزة الإحالات", callback_data="adm_feat_ref"))
@@ -685,6 +763,11 @@ def handle_dynamic_admin_actions(call):
             )
             bot.answer_callback_query(call.id)
 
+
+# ═══════════════════════════════════════════════════════════════
+#  CALLBACK HANDLER
+# ═══════════════════════════════════════════════════════════════
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     bot.answer_callback_query(call.id)  
@@ -693,6 +776,32 @@ def callback(call):
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
+
+        # ── إحصائيات البوت الشاملة ──
+        if data == "adm_stats":
+            db = load_db()
+            users_data = load_users()
+            total_users = len(db.get("users", []))
+            banned_count = len(db.get("banned_users", []))
+            buttons_count = len(db.get("buttons", []))
+            total_points_all = sum(u.get("points", 0) for u in users_data.get("users", {}).values())
+            
+            stats_text = (
+                f"📊 **إحصائيات البوت الشاملة:**\n\n"
+                f"👥 إجمالي المستخدمين المسجلين: `{total_users}`\n"
+                f"🚫 عدد المستخدمين المحظورين: `{banned_count}`\n"
+                f"🗂 إجمالي الخدمات والأزرار: `{buttons_count}`\n"
+                f"💎 إجمالي النقاط الموزعة لدى المستخدمين: `{total_points_all}` نقطة\n\n"
+                f"⚙️ **حالة الأنظمة:**\n"
+                f"• الهدية اليومية: {'مفعلة ✅' if db.get('gift_active', True) else 'معطلة ❌'}\n"
+                f"• مكافأة التسجيل: {'مفعلة ✅' if db.get('welcome_active', True) else 'معطلة ❌'}\n"
+                f"• نظام الإحالات: {'مفعل ✅' if db.get('ref_active', True) else 'معطل ❌'}\n"
+                f"• الاشتراك الإجباري: {'مفعل ✅' if db.get('sub_active', True) else 'معطل ❌'}"
+            )
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            bot.edit_message_text(stats_text, cid, mid, reply_markup=markup, parse_mode="Markdown")
+            return
 
         if data == "adm_settings_list" or data == "admin_buttons_list":
             db = load_db()
@@ -1384,18 +1493,19 @@ def callback(call):
             extra = f" وو {total} زر فرعي" if total else ""
             bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
 
+        # ── إعدادات وإدارة المستخدمين المحسنة ──
         elif data == "adm_users":
-            markup = types.InlineKeyboardMarkup()
+            markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
-                types.InlineKeyboardButton("👁 عرض المستخدمين", callback_data="usr_view")
+                types.InlineKeyboardButton("👁 عرض كافة المستخدمين", callback_data="usr_view"),
+                types.InlineKeyboardButton("🔍 إدارة مستخدم محدد (نقاط/حظر/استعلام)", callback_data="usr_lookup_prompt")
             )
             markup.add(
-                types.InlineKeyboardButton("🚫 حظر مستخدم", callback_data="usr_ban")
+                types.InlineKeyboardButton("🚫 حظر مستخدم بالـ ID", callback_data="usr_ban"),
+                types.InlineKeyboardButton("✅ رفع الحظر عن مستخدم", callback_data="usr_unban")
             )
-            markup.add(
-                types.InlineKeyboardButton("✅ رفع الحظر", callback_data="usr_unban")
-            )
-            bot.send_message(cid, "👥 إدارة المستخدمين:", reply_markup=markup)
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            bot.edit_message_text("👥 **إدارة المستخدمين المتقدمة:**\n\nاختر الإجراء المطلوب:", cid, mid, reply_markup=markup, parse_mode="Markdown")
 
         elif data == "usr_view":
             db = load_db()
@@ -1405,10 +1515,66 @@ def callback(call):
                 bot.send_message(cid, "لا يوجد مستخدمون مسجلون بعد.")
                 return
             lines = [f"• {u}{' 🚫' if u in banned else ''}" for u in users]
-            bot.send_message(
-                cid,
-                f"👥 المستخدمون ({len(users)}):\n" + "\n".join(lines) + "\n\n🚫 = محظور",
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لقائمة المستخدمين", callback_data="adm_users"))
+            bot.edit_message_text(
+                f"👥 المستخدمون المسجلون ({len(users)}):\n\n" + "\n".join(lines[:50]) + ("\n\n...(تم عرض أول 50 مستخدم)" if len(lines) > 50 else "") + "\n\n🚫 = محظور",
+                cid, mid, reply_markup=markup
             )
+
+        elif data == "usr_lookup_prompt":
+            set_state(uid, WAIT_USER_LOOKUP)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_users"))
+            bot.edit_message_text(
+                "🔍 أرسل الآن **ID المستخدم** الذي تريد إدارة حسابه (معرفة نقاطه، تعديل رصيده، أو حظره):\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data.startswith("usropt_"):
+            parts = data.split("_")
+            action = parts[1]
+            target_id = int(parts[2])
+            uid_str = str(target_id)
+            
+            users_data = load_users()
+            db = load_db()
+            user_rec = users_data["users"].get(uid_str)
+            
+            if not user_rec:
+                bot.answer_callback_query(call.id, "⚠️ هذا المستخدم غير مسجل في قاعدة بيانات النقاط.", show_alert=True)
+                return
+                
+            if action in ["add", "sub"]:
+                set_state(uid, WAIT_USER_POINTS_MODIFY, target_id=target_id, action=action)
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_users"))
+                action_name = "إضافة نقاط إلى" if action == "add" else "خصم نقاط من"
+                bot.edit_message_text(
+                    f"✍️ أنت الآن تقوم بـ **{action_name}** المستخدم (`{target_id}`).\n\n"
+                    f"أرسل الآن عدد النقاط المطلوبة (برقم صحيح):\n/cancel للإلغاء",
+                    cid, mid, reply_markup=markup, parse_mode="Markdown"
+                )
+                return
+            elif action == "reset":
+                user_rec["points"] = 0
+                save_users(users_data)
+                bot.answer_callback_query(call.id, f"✅ تم تصفير نقاط المستخدم {target_id} بنجاح!", show_alert=True)
+                bot.edit_message_text(f"✅ تم تصفير نقاط المستخدم (`{target_id}`) بنجاح وأصبحت 0 نقطة.", cid, mid, parse_mode="Markdown")
+                return
+            elif action == "ban":
+                banned_list = db.setdefault("banned_users", [])
+                if target_id in banned_list:
+                    banned_list.remove(target_id)
+                    status_msg = "✅ تم رفع الحظر عن المستخدم بنجاح."
+                else:
+                    banned_list.append(target_id)
+                    status_msg = "🚫 تم حظر المستخدم بنجاح."
+                save_db(db)
+                bot.answer_callback_query(call.id, status_msg, show_alert=True)
+                bot.edit_message_text(f"{status_msg} (`{target_id}`)", cid, mid, parse_mode="Markdown")
+                return
 
         elif data == "usr_ban":
             set_state(uid, WAIT_BAN)
@@ -1439,6 +1605,7 @@ def callback(call):
 
     except Exception as e:
         report_admin_error(e, "callback")
+
 
 @bot.message_handler(
     content_types=["text", "photo", "document", "video", "audio", "voice", "sticker"],
@@ -1503,6 +1670,90 @@ def handle_state(message):
             f"نوع المحتوى: {ct}\n\n"
             f"💡 **تلميح:** إذا أردت قفل هذا الزر بنقاط، يمكنك الذهاب إلى «لوحة التحكم» ➔ «قفل الخدمات بنقاط».",
         )
+
+    elif state == WAIT_USER_LOOKUP:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل ID المستخدم كرقم صحيح.")
+            return
+        try:
+            target_id = int(message.text.strip())
+            uid_str = str(target_id)
+            users_data = load_users()
+            db = load_db()
+            
+            user_rec = users_data["users"].get(uid_str)
+            if not user_rec:
+                bot.send_message(cid, f"⚠️ المستخدم برقم `{target_id}` غير مسجل في قاعدة بيانات النقاط.", parse_mode="Markdown")
+                clear_state(uid)
+                return
+            
+            is_banned = target_id in db.get("banned_users", [])
+            name = user_rec.get("name", "بدون اسم")
+            points = user_rec.get("points", 0)
+            ref_count = user_rec.get("referrals_count", 0)
+            
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("➕ إضافة نقاط", callback_data=f"usropt_add_{target_id}"),
+                types.InlineKeyboardButton("➖ خصم نقاط", callback_data=f"usropt_sub_{target_id}")
+            )
+            markup.add(
+                types.InlineKeyboardButton("🔄 تصفير النقاط", callback_data=f"usropt_reset_{target_id}"),
+                types.InlineKeyboardButton("🚫 حظر/رفع حظر", callback_data=f"usropt_ban_{target_id}")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            
+            bot.send_message(
+                cid,
+                f"👤 **معلومات المستخدم:**\n\n"
+                f"• الآيدي (`ID`): `{target_id}`\n"
+                f"• الاسم: {name}\n"
+                f"• الرصيد الحالي: **{points}** نقطة\n"
+                f"• عدد الإحالات: {ref_count}\n"
+                f"• الحالة: {'محظور 🚫' if is_banned else 'غير محظور ✅'}\n\n"
+                f"اختر الإجراء المطلوب على حساب هذا المستخدم:",
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+            clear_state(uid)
+        except ValueError:
+            bot.send_message(cid, "❌ خطأ: يرجى إرسال ID صحيح (رقم فقط).")
+
+    elif state == WAIT_USER_POINTS_MODIFY:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل عدد النقاط كرقم صحيح.")
+            return
+        try:
+            amount = int(message.text.strip())
+            st_data = get_data(uid)
+            target_id = st_data.get("target_id")
+            action = st_data.get("action")
+            uid_str = str(target_id)
+            
+            users_data = load_users()
+            user_rec = users_data["users"].get(uid_str)
+            
+            if not user_rec:
+                bot.send_message(cid, "⚠️ المستخدم غير موجود.")
+                clear_state(uid)
+                return
+                
+            current_pts = user_rec.get("points", 0)
+            if action == "add":
+                user_rec["points"] = current_pts + amount
+                msg_text = f"✅ تم إضافة {amount} نقطة بنجاح للمستخدم (`{target_id}`).\nالرصيد الجديد: **{user_rec['points']}** نقطة."
+            else:
+                user_rec["points"] = max(0, current_pts - amount)
+                msg_text = f"✅ تم خصم {amount} نقطة بنجاح من المستخدم (`{target_id}`).\nالرصيد الجديد: **{user_rec['points']}** نقطة."
+                
+            save_users(users_data)
+            clear_state(uid)
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            bot.send_message(cid, msg_text, reply_markup=markup, parse_mode="Markdown")
+        except ValueError:
+            bot.send_message(cid, "❌ خطأ: يرجى إرسال رقم صحيح فقط.")
 
     elif state == WAIT_LOCK_POINTS:
         if message.content_type != "text":
@@ -1712,6 +1963,7 @@ def handle_state(message):
         clear_state(uid)
         bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
 
+
 def save_new_gift_points(message):
     try:
         new_pts = int(message.text.strip())
@@ -1721,6 +1973,7 @@ def save_new_gift_points(message):
         bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الهدية اليومية بنجاح إلى: {new_pts} نقطة.")
     except ValueError:
         bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+
 
 def save_new_welcome_points(message):
     try:
@@ -1732,6 +1985,7 @@ def save_new_welcome_points(message):
     except ValueError:
         bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
 
+
 def save_new_ref_points(message):
     try:
         new_pts = int(message.text.strip())
@@ -1741,6 +1995,7 @@ def save_new_ref_points(message):
         bot.send_message(message.chat.id, f"✅ تم تحديث عدد نقاط الإحالة بنجاح إلى: {new_pts} نقطة.")
     except ValueError:
         bot.send_message(message.chat.id, f"❌ خطأ: يرجى إرسال رقم صحيح فقط.")
+
 
 def save_new_sub_name(message):
     new_name = message.text.strip()
@@ -1807,7 +2062,10 @@ def process_remove_channel(message):
     else:
         bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة الحالية.")
 
-# ==================== RUN ====================
+
+# ═══════════════════════════════════════════════════════════════
+#  RUN
+# ═══════════════════════════════════════════════════════════════
 
 logger.info("Bot is starting (polling)...")
 while True:
