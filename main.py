@@ -168,6 +168,9 @@ WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
 WAIT_USER_LOOKUP = "WAIT_USER_LOOKUP"
 WAIT_USER_POINTS_MODIFY = "WAIT_USER_POINTS_MODIFY"
+WAIT_ENTER_GIFT_CODE = "WAIT_ENTER_GIFT_CODE"
+WAIT_NEW_CODE_STR = "WAIT_NEW_CODE_STR"
+WAIT_NEW_CODE_PTS = "WAIT_NEW_CODE_PTS"
 
 
 def set_state(uid, state, **data):
@@ -207,7 +210,8 @@ DEFAULT_CONFIG = {
     "ref_name": "نظام الإحالة",
     "welcome_active": True,
     "welcome_points": 1,
-    "welcome_name": "مكافأة التسجيل"
+    "welcome_name": "مكافأة التسجيل",
+    "gift_codes": [] # قائمة أكواد الهدايا والمسابقات
 }
 
 def load_db():
@@ -573,6 +577,7 @@ def build_nav_markup(db, parent_id=None):
             types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
             types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info")
         )
+        markup.add(types.InlineKeyboardButton("🎟️ كود هدية 🎁", callback_data="gift_code_prompt"))
     return markup
 
 
@@ -688,6 +693,7 @@ def admin_menu_markup():
     markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
     markup.add(types.InlineKeyboardButton("📊 إحصائيات البوت", callback_data="adm_stats"))
     markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
+    markup.add(types.InlineKeyboardButton("🎟️ إدارة أكواد الهدايا والمسابقات", callback_data="adm_gift_codes_menu"))
     markup.add(types.InlineKeyboardButton("⭐ إعدادات مكافأة التسجيل", callback_data="adm_feat_welcome"))
     markup.add(types.InlineKeyboardButton("🔗 إعدادات ميزة الإحالات", callback_data="adm_feat_ref"))
     markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
@@ -791,6 +797,99 @@ def callback(call):
         uid = call.from_user.id
         cid = call.message.chat.id
         mid = call.message.message_id
+
+        # ── إدارة أكواد الهدايا والمسابقات ──
+        if data == "adm_gift_codes_menu":
+            db = load_db()
+            codes = db.get("gift_codes", [])
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("➕ إنشاء كود جديد", callback_data="adm_add_gift_code"),
+                types.InlineKeyboardButton("📋 عرض الأكواد النشطة", callback_data="adm_list_gift_codes")
+            )
+            markup.add(types.InlineKeyboardButton("🗑️ حذف كود محدد", callback_data="adm_del_gift_code_prompt"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                f"🎟️ **إدارة أكواد الهدايا والمسابقات:**\n\n"
+                f"• إجمالي الأكواد الحالية: `{len(codes)}` كود\n\n"
+                f"اختر العملية المطلوبة:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "adm_add_gift_code":
+            set_state(uid, WAIT_NEW_CODE_STR)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_gift_codes_menu"))
+            bot.edit_message_text(
+                "🎟️ **إنشاء كود هدية جديد:**\n\n"
+                "أرسل الآن **صيغة الكود** (مثال: `WINNER2026` أو `RAMADAN10`):\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "adm_list_gift_codes":
+            db = load_db()
+            codes = db.get("gift_codes", [])
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_gift_codes_menu"))
+            if not codes:
+                bot.edit_message_text("📋 لا توجد أي أكواد هدايا أو مسابقات نشطة حالياً.", cid, mid, reply_markup=markup)
+            else:
+                lines = [f"• الكود: `{c['code']}` | النقاط: **{c['points']}** نقطة" for c in codes]
+                bot.edit_message_text(
+                    f"📋 **قائمة الأكواد النشطة حالياً ({len(codes)}):**\n\n" + "\n".join(lines),
+                    cid, mid, reply_markup=markup, parse_mode="Markdown"
+                )
+            return
+
+        elif data == "adm_del_gift_code_prompt":
+            db = load_db()
+            codes = db.get("gift_codes", [])
+            markup = types.InlineKeyboardMarkup()
+            if not codes:
+                markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_gift_codes_menu"))
+                bot.edit_message_text("📋 لا توجد أكواد لحذفها.", cid, mid, reply_markup=markup)
+                return
+            for c in codes:
+                markup.add(types.InlineKeyboardButton(f"🗑️ حذف الكود: {c['code']} ({c['points']} نقطة)", callback_data=f"del_gcode_{c['code']}"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_gift_codes_menu"))
+            bot.edit_message_text("اختر الكود المراد حذفه نهائياً:", cid, mid, reply_markup=markup)
+            return
+
+        elif data.startswith("del_gcode_"):
+            target_code = data.replace("del_gcode_", "")
+            db = load_db()
+            codes = db.get("gift_codes", [])
+            db["gift_codes"] = [c for c in codes if c["code"] != target_code]
+            save_db(db)
+            bot.answer_callback_query(call.id, f"✅ تم حذف الكود ({target_code}) بنجاح!", show_alert=True)
+            
+            # العودة للقائمة
+            codes_new = db["gift_codes"]
+            markup = types.InlineKeyboardMarkup()
+            if not codes_new:
+                markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_gift_codes_menu"))
+                bot.edit_message_text("📋 لا توجد أكواد أخرى.", cid, mid, reply_markup=markup)
+                return
+            for c in codes_new:
+                markup.add(types.InlineKeyboardButton(f"🗑️ حذف الكود: {c['code']} ({c['points']} نقطة)", callback_data=f"del_gcode_{c['code']}"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_gift_codes_menu"))
+            bot.edit_message_text("اختر كوداً آخر لحذفه أو ارجع:", cid, mid, reply_markup=markup)
+            return
+
+        elif data == "gift_code_prompt":
+            set_state(uid, WAIT_ENTER_GIFT_CODE)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="nav_back_root"))
+            bot.send_message(
+                cid,
+                "🎟️ **استبدال كود الهدية أو المسابقة:**\n\n"
+                "أرسل الآن الكود الذي حصلت عليه في المسابقة لاستلام نقاطك فوراً:\n/cancel للإلغاء",
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+            return
 
         # ── إحصائيات البوت الشاملة ──
         if data == "adm_stats":
@@ -1574,7 +1673,6 @@ def callback(call):
             )
             return
 
-        # معالجات الأزرار الجديدة الإضافية لضمان عدم حدوث أي خطأ عند الضغط عليها
         elif data in ["usr_temp_ban", "usr_autoban_settings", "usr_daily_stats", "usr_points_consumption", "usr_buttons_interaction", "usr_points_distribution"]:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
@@ -1687,7 +1785,105 @@ def handle_state(message):
         bot.send_message(cid, "❌ تم الإلغاء.")
         return
 
-    if state == WAIT_BTN_NAME:
+    if state == WAIT_NEW_CODE_STR:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل صيغة الكود كنص من فضلك.")
+            return
+        code_text = message.text.strip()
+        set_state(uid, WAIT_NEW_CODE_PTS, code_text=code_text)
+        bot.send_message(
+            cid,
+            f"✅ الكود: «{code_text}»\n\n"
+            f"الآن أرسل **عدد النقاط** التي سيحصل عليها من يستخدم هذا الكود (برقم صحيح):\n/cancel للإلغاء",
+            parse_mode="Markdown"
+        )
+
+    elif state == WAIT_NEW_CODE_PTS:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل عدد النقاط برقم صحيح.")
+            return
+        try:
+            points_val = int(message.text.strip())
+            d = get_data(uid)
+            code_text = d.get("code_text")
+            
+            db = load_db()
+            if "gift_codes" not in db:
+                db["gift_codes"] = []
+                
+            # تحقق إذا كان الكود موجود مسبقاً
+            for c in db["gift_codes"]:
+                if c["code"] == code_text:
+                    bot.send_message(cid, f"⚠️ هذا الكود ({code_text}) موجود مسبقاً! اختر كوداً آخر.")
+                    clear_state(uid)
+                    return
+                    
+            db["gift_codes"].append({
+                "code": code_text,
+                "points": points_val
+            })
+            save_db(db)
+            clear_state(uid)
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 عودة لإدارة الأكواد", callback_data="adm_gift_codes_menu"))
+            bot.send_message(
+                cid,
+                f"✅ **تم إنشاء وحفظ كود الهدية/المسابقة بنجاح!**\n\n"
+                f"• الكود: `{code_text}`\n"
+                f"• النقاط المخصصة: **{points_val}** نقطة\n\n"
+                f"يمكنك الآن توزيعه في قناتك لمن يربح المسابقة!",
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+        except ValueError:
+            bot.send_message(cid, "❌ خطأ: يرجى إرسال رقم صحيح لعدد النقاط.")
+
+    elif state == WAIT_ENTER_GIFT_CODE:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل الكود كنص من فضلك.")
+            return
+        entered_code = message.text.strip()
+        db = load_db()
+        gift_codes = db.get("gift_codes", [])
+        
+        found_code = None
+        for c in gift_codes:
+            if c["code"] == entered_code:
+                found_code = c
+                break
+                
+        if not found_code:
+            bot.send_message(cid, "❌ **عذراً، هذا الكود غير صحيح أو انتهى استخدامه أو تم استبداله مسبقاً!**", parse_mode="Markdown")
+            clear_state(uid)
+            return
+            
+        pts = found_code["points"]
+        
+        # إزالة الكود لكي يصبح صالحاً للاستخدام مرة واحدة فقط (لمن يربح أولاً)
+        db["gift_codes"] = [c for c in gift_codes if c["code"] != entered_code]
+        save_db(db)
+        
+        # إضافة النقاط للمستخدم
+        users_data = load_users()
+        uid_str = str(uid)
+        if uid_str not in users_data["users"]:
+            register_user_points(uid, message.from_user.first_name or "")
+            users_data = load_users()
+            
+        users_data["users"][uid_str]["points"] = users_data["users"][uid_str].get("points", 0) + pts
+        save_users(users_data)
+        clear_state(uid)
+        
+        bot.send_message(
+            cid,
+            f"🎉 **مبروك! تم استبدال الكود بنجاح!**\n\n"
+            f"• لقد حصلت على: **{pts}** نقطة\n"
+            f"• رصيدك الحالي: **{users_data['users'][uid_str]['points']}** نقطة 🌟",
+            parse_mode="Markdown"
+        )
+
+    elif state == WAIT_BTN_NAME:
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل اسم الزر كنص من فضلك.")
             return
