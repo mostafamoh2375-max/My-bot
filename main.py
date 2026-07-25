@@ -829,6 +829,7 @@ def callback(call):
             b_settings["pin"] = not b_settings.get("pin", False)
             save_db(db)
             bot.answer_callback_query(call.id, "✅ تم تغيير إعداد التثبيت بنجاح!")
+            # إعادة تحميل القائمة
             pin_st = "مفعل 📌" if b_settings["pin"] else "معطل ❌"
             silent_st = "مفعل 🔕" if b_settings.get("silent") else "معطل 🔔"
             markup = types.InlineKeyboardMarkup(row_width=1)
@@ -2312,6 +2313,7 @@ def handle_state(message):
             parse_mode="Markdown"
         )
 
+
 def save_new_gift_points(message):
     try:
         new_pts = int(message.text.strip())
@@ -2388,45 +2390,41 @@ def process_add_channel(message):
             
         db["sub_channels"].append(ch)
         save_db(db)
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
-        bot.send_message(cid, f"✅ تم إضافة القناة ({ch}) بنجاح إلى قائمة الاشتراك الإجباري!", reply_markup=markup)
+        bot.send_message(
+            cid, 
+            f"✅ تمت إضافة القناة بنجاح واجتازت كافة الشروط!\n\n"
+            f"• اسم القناة: {chat_info.title}\n"
+            f"• المعرف: {ch}"
+        )
     except Exception as e:
-        bot.send_message(cid, f"❌ خطأ: تعذر التحقق من القناة. تأكد من صحة المعرف وأن البوت مشرف فيها.\nالتفاصيل: {str(e)}")
+        logger.exception("Failed to add channel %s: %s", ch, e)
+        bot.send_message(cid, "❌ خطأ في التحقق من القناة! تأكد من صحة المعرف وأن البوت مشرف فيها.")
 
 def process_remove_channel(message):
-    cid = message.chat.id
-    raw_text = message.text.strip()
-    ch = raw_text
-    if "t.me/" in ch:
-        ch = "@" + ch.split("t.me/")[-1].split("/")[0].strip()
-    elif not ch.startswith("@"):
-        ch = "@" + ch
-        
+    ch = message.text.strip()
     db = load_db()
-    channels = db.get("sub_channels", REQUIRED_CHANNELS.copy())
-    
-    found = None
-    for c in channels:
-        if c.lower() == ch.lower():
-            found = c
-            break
-            
-    if not found:
-        bot.send_message(cid, f"⚠️ القناة ({ch}) غير موجودة في القائمة.")
-        return
-        
-    channels.remove(found)
-    db["sub_channels"] = channels
-    save_db(db)
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 رجوع لإعدادات الاشتراك", callback_data="adm_feat_sub"))
-    bot.send_message(cid, f"✅ تم إزالة القناة ({ch}) بنجاح من قائمة الاشتراك الإجباري!", reply_markup=markup)
+    channels = db.get("sub_channels", REQUIRED_CHANNELS)
+    if ch in channels:
+        channels.remove(ch)
+        db["sub_channels"] = channels
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
+    else:
+        bot.send_message(message.chat.id, f"❌ هذه القناة غير موجودة في القائمة الحالية.")
 
-# ==================== تشغيل البوت ====================
-if __name__ == "__main__":
-    logger.info("Starting bot polling...")
-    bot.infinity_polling(skip_pending=True)
-    
+
+# ═══════════════════════════════════════════════════════════════
+#  RUN
+# ═══════════════════════════════════════════════════════════════
+
+logger.info("Bot is starting (polling)...")
+while True:
+    try:
+        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    except Exception as e:
+        logger.exception("Polling crashed — will restart in 5s")
+        try:
+            bot.send_message(ADMIN_ID, f"⚠️ Bot polling crashed: {type(e).__name__}: {str(e)[:300]}")
+        except Exception:
+            logger.exception("Failed to notify admin about polling crash")
+            time.sleep(5)
