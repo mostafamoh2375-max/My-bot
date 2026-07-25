@@ -6,11 +6,10 @@ import logging
 from flask import Flask
 from threading import Thread
 from pymongo import MongoClient
-from pymongo import MongoClient
 
 # 1. الاتصال بقاعدة البيانات
 client = MongoClient(
-    "mongodb+srv://mostafamoh2375_db_user:MKSybnr160hjilGEv7MZG@cluster0.rxdqdlv.mongodb.net/?appName=Cluster0"
+    "mongodb+srv://mostafamoh2375_db_user:MKSybnr160hjilGEv7MZG@cluster0.rxdqdlv.mongodb.net/mostafamoh2375_db_user?appName=Cluster0"
 )
 db = client.get_database()
 
