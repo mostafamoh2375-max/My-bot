@@ -6,6 +6,90 @@ import logging
 from flask import Flask
 from threading import Thread
 from pymongo import MongoClient
+from pymongo import MongoClient
+
+# 1. الاتصال بقاعدة البيانات
+client = MongoClient(
+    "mongodb+srv://mostafamoh2375_db_user:MKSybnr@GEv7MZG@cluster0.rxdqdlv.mongodb.net/?appName=Cluster0"
+)
+db = client.get_database()
+
+# 2. إدخال الأزرار تلقائياً إذا كانت القاعدة فارغة
+if db.buttons.count_documents({}) == 0:
+  buttons_data = [
+      {
+          "id": "7787b22b",
+          "name": "خدمة التطبيقات 🛍",
+          "content": "تطبيقات سلملي",
+          "parent_id": None,
+      },
+      {
+          "id": "4e8bda81",
+          "name": "تطبيقات المدفوعه",
+          "content_type": "document",
+          "content": (
+              "BQACAgQAAxkBAAIBCWpW_bw_UISLUE6NdyVPccJng7Q9AAI4GgACunW4UlmUx04MM8hLPQQ"
+          ),
+          "parent_id": "7787b22b",
+          "password": "",
+      },
+      {
+          "id": "48536625",
+          "name": "📩 الشكاوي",
+          "content_type": "text",
+          "content": (
+              "📩 الشكاوي والمقترحات\n\nمن فضلك أخبرنا بالمشكلة 😞\nأو اقترح"
+              " تعديلاً لتحسين البوت ❤️\n\n(يمكنك إرسال نص / صورة / صوت / فيديو /"
+              " ملف)"
+          ),
+          "parent_id": None,
+          "password": "",
+      },
+      {
+          "id": "65baee1a",
+          "name": "🔰مالك البوت",
+          "content_type": "text",
+          "content": "@Y_S_KK",
+          "parent_id": None,
+          "password": "",
+      },
+      {
+          "id": "8d0e6f86",
+          "name": "جديد",
+          "content_type": "text",
+          "content": (
+              "البوت تحت الصيانه ⚠ || سيتم تحديث خدمات البوت في اقرب وقت شكرا"
+              " لتفهمكم"
+          ),
+          "parent_id": None,
+          "password": "",
+      },
+  ]
+  db.buttons.insert_many(buttons_data)
+
+# 3. إعدادات القنوات والمشرفين
+if db.settings.count_documents({"_id": "config"}) == 0:
+  db.settings.update_one(
+      {"_id": "config"},
+      {
+          "$set": {
+              "required_channels": ["@Salemly_1", "@shr_llh"],
+              "admins": [8097008430],
+          }
+      },
+      upsert=True,
+  )
+
+# 4. إدخال بيانات المستخدم والنقاط
+if db.users.count_documents({"_id": "users_dict"}) == 0:
+  users_data = {
+      "8097008430": {
+          "name": "مصطفى شخصيه خياليه",
+          "points": 2,
+          "last_gift": 1784096431.0477734,
+      }
+  }
+  db.users.insert_one({"_id": "users_dict", "data": users_data})
 
 # ==================== إعداد خادم Flask للبقاء حياً على Render ====================
 app = Flask('')
