@@ -16,13 +16,16 @@ MONGO_URI = os.environ.get(
 )
 client = MongoClient(MONGO_URI)
 
+# توحيد قاعدة البيانات لتجنب الضياع بين قواعد بيانات متعددة
 mongo_db = client["telegram_bot_db"]
 config_collection = mongo_db["config"]
 users_collection = mongo_db["users_data"]
 
+# Admin Telegram ID (integer)
 ADMIN_ID = 8097008430
 REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
+# الإعدادات الافتراضية متضمنة الأزرار الأولية
 DEFAULT_CONFIG = {
     "_id": "config",
     "buttons": [
@@ -110,8 +113,10 @@ def save_db(data):
     data_to_save["_id"] = "config"
     config_collection.replace_one({"_id": "config"}, data_to_save, upsert=True)
 
+# التأكد من وجود إعدادات البوت والمسؤول في قاعدة البيانات عند البدء
 load_db()
 
+# إدخال بيانات المشرف الافتراضية في جدول المستخدمين إذا كانت فارغة
 if users_collection.count_documents({"_id": "8097008430"}) == 0:
     users_collection.insert_one({
         "_id": "8097008430",
@@ -139,18 +144,22 @@ def run():
 t = Thread(target=run)
 t.start()
 
+# Bot token (required)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
 
 if not TOKEN:
     sys.stderr.write("ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.\n")
     raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set")
 
+# Create bot instance
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
+# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 def report_admin_error(exc: Exception, context: str = ""):
+    """Log exception and attempt to notify the admin with a short traceback."""
     try:
         logger.exception("Unhandled exception in %s: %s", context, exc)
     except Exception:
@@ -163,8 +172,12 @@ def report_admin_error(exc: Exception, context: str = ""):
     except Exception:
         logger.exception("Failed to send error message to ADMIN_ID")
 
-user_states = {}
-user_data = {}
+# ═══════════════════════════════════════════════════════════════
+#  STATE MACHINE & HELPERS
+# ═══════════════════════════════════════════════════════════════
+
+user_states = {}  # uid → state string
+user_data = {}  # uid → dict of temporary data
 
 WAIT_BTN_NAME = "WAIT_BTN_NAME"
 WAIT_BTN_CONTENT = "WAIT_BTN_CONTENT"
@@ -345,7 +358,7 @@ def process_referral_reward(user_id):
             except Exception as e:
                 logger.exception("Failed to notify referrer %s: %s", referrer_id, e)
 
-GIFT_INTERVAL = 86400
+GIFT_INTERVAL = 86400  # 24 hours in seconds
 
 def claim_daily_gift(user_id):
     users_data = load_users()
@@ -476,10 +489,10 @@ def build_nav_markup(db, parent_id=None):
         db_data = load_db()
         gift_name = db_data.get("gift_name", "الهدية اليومية")
         ref_name = db_data.get("ref_name", "رابط الإحالة")
-        if db_data.get("gift_active", True):
-            markup.add(types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"))
-        if db_data.get("ref_active", True):
-            markup.add(types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info"))
+        markup.add(
+            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
+            types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info")
+        )
     return markup
 
 def back_only_markup(btn):
@@ -518,7 +531,9 @@ def build_admin_settings_markup(db, parent_id=None):
         markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
     return markup
 
-# ==================== BOT HANDLERS ====================
+# ═══════════════════════════════════════════════════════════════
+#  BOT HANDLERS
+# ═══════════════════════════════════════════════════════════════
 
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -743,8 +758,6 @@ def callback(call):
             db = load_db()
             current_points = db.get("gift_points", 2)
             gift_name = db.get("gift_name", "الهدية اليومية")
-            gift_st = "مفعلة ✅" if db.get("gift_active", True) else "معطلة ❌"
-            
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(
                 types.InlineKeyboardButton("✏️ تعديل عدد النقاط", callback_data="edit_gift_points_val"),
@@ -756,7 +769,7 @@ def callback(call):
             )
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_back_main"))
             bot.edit_message_text(
-                f"⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• اسم الخدمة: {gift_name}\n• الحالة: {gift_st}\n• النقاط الحالية: {current_points}\n\nاختر ما تريد تعديله:", 
+                f"⚙️ إعدادات الهدية اليومية المتقدمة:\n\n• اسم الخدمة: {gift_name}\n• الحالة: مفعلة ✅\n• النقاط الحالية: {current_points}\n\nاختر ما تريد تعديله:", 
                 cid, mid, reply_markup=markup
             )
             return
