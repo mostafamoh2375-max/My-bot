@@ -188,7 +188,7 @@ def get_data(uid):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  DATABASE (MongoDB Adapters)[cite: 4]
+#  DATABASE (MongoDB Adapters)
 # ═══════════════════════════════════════════════════════════════
 
 DEFAULT_CONFIG = {
@@ -468,32 +468,34 @@ def new_id():
 
 
 # ═══════════════════════════════════════════════════════════════
-#  CONTENT HELPERS
+#  CONTENT HELPERS (Updated to handle file captions/descriptions)
 # ═══════════════════════════════════════════════════════════════
 
 def extract_content(message):
     ct = message.content_type
+    caption = message.caption if message.caption else ""
     if ct == "text":
-        return "text", message.text.strip()
+        return "text", message.text.strip(), ""
     elif ct == "photo":
-        return "photo", message.photo[-1].file_id
+        return "photo", message.photo[-1].file_id, caption
     elif ct == "document":
-        return "document", message.document.file_id
+        return "document", message.document.file_id, caption
     elif ct == "video":
-        return "video", message.video.file_id
+        return "video", message.video.file_id, caption
     elif ct == "audio":
-        return "audio", message.audio.file_id
+        return "audio", message.audio.file_id, caption
     elif ct == "voice":
-        return "voice", message.voice.file_id
+        return "voice", message.voice.file_id, caption
     elif ct == "sticker":
-        return "sticker", message.sticker.file_id
+        return "sticker", message.sticker.file_id, ""
     else:
-        return "text", ""
+        return "text", message.text or "", caption
 
 
 def send_content(cid, btn, back_markup):
     ct = btn.get("content_type", "text")
     content = btn.get("content", "")
+    caption = btn.get("caption", "")
     name = btn.get("name", "")
 
     if not content:
@@ -506,22 +508,35 @@ def send_content(cid, btn, back_markup):
         if ct == "text":
             bot.send_message(cid, content, reply_markup=back_markup)
         elif ct == "photo":
-            bot.send_photo(cid, content, reply_markup=back_markup)
+            bot.send_photo(cid, content, caption=caption if caption else None, reply_markup=back_markup)
         elif ct == "document":
-            bot.send_document(cid, content, reply_markup=back_markup)
+            bot.send_document(cid, content, caption=caption if caption else None, reply_markup=back_markup)
         elif ct == "video":
-            bot.send_video(cid, content, reply_markup=back_markup)
+            bot.send_video(cid, content, caption=caption if caption else None, reply_markup=back_markup)
         elif ct == "audio":
-            bot.send_audio(cid, content, reply_markup=back_markup)
+            bot.send_audio(cid, content, caption=caption if caption else None, reply_markup=back_markup)
         elif ct == "voice":
-            bot.send_voice(cid, content, reply_markup=back_markup)
+            bot.send_voice(cid, content, caption=caption if caption else None, reply_markup=back_markup)
         elif ct == "sticker":
+            if caption:
+                bot.send_message(cid, caption)
             bot.send_sticker(cid, content)
             bot.send_message(cid, "↩️", reply_markup=back_markup)
         else:
             bot.send_message(cid, content, reply_markup=back_markup)
     except Exception as e:
-        report_admin_error(e, "send_content")
+        # Fallback without markdown parsing if syntax errors occur in caption
+        try:
+            if ct == "photo":
+                bot.send_photo(cid, content, caption=caption if caption else None, reply_markup=back_markup)
+            elif ct == "document":
+                bot.send_document(cid, content, caption=caption if caption else None, reply_markup=back_markup)
+            elif ct == "video":
+                bot.send_video(cid, content, caption=caption if caption else None, reply_markup=back_markup)
+            else:
+                bot.send_message(cid, content, reply_markup=back_markup)
+        except Exception as ex:
+            report_admin_error(ex, "send_content")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -604,7 +619,7 @@ def build_admin_settings_markup(db, parent_id=None):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  /start[cite: 4]
+#  /start
 # ═══════════════════════════════════════════════════════════════
 
 @bot.message_handler(commands=["start"])
@@ -665,7 +680,7 @@ def start(message):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  /admin[cite: 4]
+#  /admin
 # ═══════════════════════════════════════════════════════════════
 
 def admin_menu_markup():
@@ -1493,7 +1508,7 @@ def callback(call):
             extra = f" وو {total} زر فرعي" if total else ""
             bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
 
-        # ── إعدادات وإدارة المستخدمين المحسنة ──
+        # ── إدارة المستخدمين ──
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
@@ -1639,15 +1654,17 @@ def handle_state(message):
         bot.send_message(
             cid,
             f"✅ الاسم: «{btn_name}»\n\n"
-            f"الآن أرسل المحتوى للزر (نص، صورة، فيديو، ملف...):\n/cancel للإلغاء",
+            f"الآن أرسل المحتوى للزر (تطبيق/ملف، صورة، فيديو، مع كتابة الشرح أو الوصف معها مباشرة إذا أردت):\n/cancel للإلغاء",
         )
 
     elif state == WAIT_BTN_CONTENT:
-        bot.send_message(cid, "⏳ تم استلام المحتوى وحفظه...")
+        bot.send_message(cid, "⏳ تم استلام المحتوى والشرح وحفظهما...")
         d = get_data(uid)
         parent_id = d.get("parent_id")
         btn_name = d.get("btn_name", "زر")
-        ct, content = extract_content(message)
+        
+        # استخراج المحتوى والملف والشرح التلقائي المرفق معه
+        ct, content, caption = extract_content(message)
         
         db = load_db()
         db["buttons"].append(
@@ -1656,6 +1673,7 @@ def handle_state(message):
                 "name": btn_name,
                 "content_type": ct,
                 "content": content,
+                "caption": caption,  # حفظ الشرح التلقائي هنا
                 "parent_id": parent_id,
                 "unlock_points": 0,
                 "unlock_desc": ""
@@ -1666,9 +1684,10 @@ def handle_state(message):
         
         bot.send_message(
             cid,
-            f"✅ تم حفظ الزر «{btn_name}» بنجاح في المكان المختار!\n"
-            f"نوع المحتوى: {ct}\n\n"
-            f"💡 **تلميح:** إذا أردت قفل هذا الزر بنقاط، يمكنك الذهاب إلى «لوحة التحكم» ➔ «قفل الخدمات بنقاط».",
+            f"✅ تم حفظ الزر والمحتوى والشرح بنجاح!\n"
+            f"• النوع: {ct}\n"
+            f"• الشرح المرفق: {'موجود ✅' if caption else 'بدون شرح'}\n\n"
+            f"💡 يمكنك قفل هذا الزر بنقاط من لوحة التحكم.",
         )
 
     elif state == WAIT_USER_LOOKUP:
