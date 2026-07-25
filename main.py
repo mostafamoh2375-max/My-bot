@@ -1,17 +1,18 @@
 import os
 import sys
-import json
 import uuid
 import time
 import logging
 from flask import Flask
 from threading import Thread
+from pymongo import MongoClient
 
+# ==================== إعداد خادم Flask للبقاء حياً على Render ====================
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive"
+    return "Bot is alive and connected to MongoDB Atlas"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -22,9 +23,12 @@ t.start()
 import telebot
 from telebot import types
 
-# Files for JSON storage
-DB_FILE = "buttons.json"
-USERS_FILE = "users.json"
+# ==================== إعدادات اتصال MongoDB Atlas ====================
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://mostafamoh2375_db_user:0ifWoPp7a0cynuI1@cluster0.rxdqdlv.mongodb.net/?appName=Cluster0")
+client = MongoClient(MONGO_URI)
+mongo_db = client["telegram_bot_db"]
+config_collection = mongo_db["config"]
+users_collection = mongo_db["users_data"]
 
 # Bot token (required)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "7623300303:AAHA-f9LWLbKE4uP-1ZDn8E2IHkGzUm5vaM"
@@ -99,51 +103,50 @@ def get_data(uid):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  DATABASE
+#  DATABASE (MongoDB Adapters)
 # ═══════════════════════════════════════════════════════════════
 
+DEFAULT_CONFIG = {
+    "_id": "config",
+    "buttons": [], 
+    "users": [], 
+    "banned_users": [], 
+    "gift_points": 2, 
+    "gift_name": "الهدية اليومية", 
+    "gift_active": True,
+    "sub_active": True, 
+    "sub_channels": REQUIRED_CHANNELS.copy(),
+    "ref_active": True,
+    "ref_points": 2,
+    "ref_name": "نظام الإحالة",
+    "welcome_active": True,
+    "welcome_points": 1,
+    "welcome_name": "مكافأة التسجيل"
+}
+
 def load_db():
-    if not os.path.exists(DB_FILE):
-        default = {
-            "buttons": [], 
-            "users": [], 
-            "banned_users": [], 
-            "gift_points": 2, 
-            "gift_name": "الهدية اليومية", 
-            "gift_active": True,
-            "sub_active": True, 
-            "sub_channels": REQUIRED_CHANNELS.copy(),
-            "ref_active": True,
-            "ref_points": 2,
-            "ref_name": "نظام الإحالة",
-            "welcome_active": True,
-            "welcome_points": 1,
-            "welcome_name": "مكافأة التسجيل"
-        }
-        save_db(default)
-        return default
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    data.setdefault("buttons", [])
-    data.setdefault("users", [])
-    data.setdefault("banned_users", [])
-    data.setdefault("gift_points", 2)
-    data.setdefault("gift_name", "الهدية اليومية")
-    data.setdefault("gift_active", True)
-    data.setdefault("sub_active", True)
-    data.setdefault("sub_channels", REQUIRED_CHANNELS.copy())
-    data.setdefault("ref_active", True)
-    data.setdefault("ref_points", 2)
-    data.setdefault("ref_name", "نظام الإحالة")
-    data.setdefault("welcome_active", True)
-    data.setdefault("welcome_points", 1)
-    data.setdefault("welcome_name", "مكافأة التسجيل")
-    return data
+    doc = config_collection.find_one({"_id": "config"})
+    if not doc:
+        config_collection.insert_one(DEFAULT_CONFIG.copy())
+        doc = DEFAULT_CONFIG.copy()
+    
+    changed = False
+    for k, v in DEFAULT_CONFIG.items():
+        if k not in doc:
+            doc[k] = v
+            changed = True
+    if changed:
+        config_collection.update_one({"_id": "config"}, {"$set": doc})
+    
+    res = dict(doc)
+    res.pop("_id", None)
+    return res
 
 
 def save_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    data_to_save = dict(data)
+    data_to_save["_id"] = "config"
+    config_collection.replace_one({"_id": "config"}, data_to_save, upsert=True)
 
 
 def register_user(user_id):
@@ -153,22 +156,25 @@ def register_user(user_id):
         save_db(db)
 
 
-# ── Points system (users.json) ──────────────────────────────────
+# ── Points system (MongoDB collection for users) ────────────────
 
 def load_users():
-    if not os.path.exists(USERS_FILE):
-        default = {"users": {}}
-        save_users(default)
-        return default
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    data.setdefault("users", {})
-    return data
+    all_users = list(users_collection.find({}))
+    users_dict = {}
+    for u in all_users:
+        uid = str(u["_id"])
+        user_copy = dict(u)
+        user_copy.pop("_id", None)
+        users_dict[uid] = user_copy
+    return {"users": users_dict}
 
 
 def save_users(data):
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    users_map = data.get("users", {})
+    for uid_str, u_data in users_map.items():
+        doc = dict(u_data)
+        doc["_id"] = str(uid_str)
+        users_collection.replace_one({"_id": str(uid_str)}, doc, upsert=True)
 
 
 def register_user_points(user_id, name=""):
@@ -187,26 +193,27 @@ def register_user_points(user_id, name=""):
         save_users(data)
     else:
         changed = False
-        if name and data["users"][uid].get("name") != name:
-            data["users"][uid]["name"] = name
+        user_rec = data["users"][uid]
+        if name and user_rec.get("name") != name:
+            user_rec["name"] = name
             changed = True
-        if "points" not in data["users"][uid]:
-            data["users"][uid]["points"] = 0
+        if "points" not in user_rec:
+            user_rec["points"] = 0
             changed = True
-        if "unlocked" not in data["users"][uid]:
-            data["users"][uid]["unlocked"] = []
+        if "unlocked" not in user_rec:
+            user_rec["unlocked"] = []
             changed = True
-        if "referred_by" not in data["users"][uid]:
-            data["users"][uid]["referred_by"] = None
+        if "referred_by" not in user_rec:
+            user_rec["referred_by"] = None
             changed = True
-        if "referral_rewarded" not in data["users"][uid]:
-            data["users"][uid]["referral_rewarded"] = False
+        if "referral_rewarded" not in user_rec:
+            user_rec["referral_rewarded"] = False
             changed = True
-        if "referrals_count" not in data["users"][uid]:
-            data["users"][uid]["referrals_count"] = 0
+        if "referrals_count" not in user_rec:
+            user_rec["referrals_count"] = 0
             changed = True
-        if "welcome_bonus_received" not in data["users"][uid]:
-            data["users"][uid]["welcome_bonus_received"] = False
+        if "welcome_bonus_received" not in user_rec:
+            user_rec["welcome_bonus_received"] = False
             changed = True
         if changed:
             save_users(data)
@@ -551,7 +558,6 @@ def start(message):
             )
             return
 
-    # Grant welcome bonus and referral reward if passing directly
     bonus_given = process_welcome_bonus(u.id)
     process_referral_reward(u.id)
 
@@ -791,7 +797,6 @@ def callback(call):
             bot.send_message(cid, "✍️ أرسل الآن اسم الخدمة الجديد للهدية اليومية:", reply_markup=markup)
             return
 
-        # ── إعدادات مكافأة التسجيل (Welcome Bonus Settings) ──
         if data == "adm_feat_welcome":
             db = load_db()
             wel_pts = db.get("welcome_points", 1)
@@ -855,7 +860,6 @@ def callback(call):
             bot.edit_message_text(f"🔄 تم تغيير حالة مكافأة التسجيل بنجاح!\nالحالة الحالية الآن: {status_text}", cid, mid, reply_markup=markup)
             return
 
-        # ── إعدادات ميزة الإحالات في لوحة التحكم ──
         if data == "adm_feat_ref":
             db = load_db()
             ref_pts = db.get("ref_points", 2)
@@ -1189,7 +1193,6 @@ def callback(call):
                 except Exception:
                     pass
                 
-                # Grant welcome bonus and referral reward upon successful verification
                 bonus_given = process_welcome_bonus(uid)
                 process_referral_reward(uid)
                 
