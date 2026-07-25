@@ -211,7 +211,8 @@ DEFAULT_CONFIG = {
     "welcome_active": True,
     "welcome_points": 1,
     "welcome_name": "مكافأة التسجيل",
-    "gift_codes": [] # قائمة أكواد الهدايا والمسابقات
+    "gift_codes": [],
+    "broadcast_settings": {"pin": False, "silent": False}
 }
 
 def load_db():
@@ -699,7 +700,7 @@ def admin_menu_markup():
     markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
     markup.add(types.InlineKeyboardButton("🔒 قفل الخدمات بنقاط", callback_data="adm_lock_menu"))
     markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"), types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
-    markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"), types.InlineKeyboardButton("📣 إرسال إعلان", callback_data="adm_broadcast"))
+    markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"), types.InlineKeyboardButton("📣 إرسال إعلان والإعدادات", callback_data="adm_broadcast_menu"))
     return markup
 
 @bot.message_handler(commands=["admin"])
@@ -798,6 +799,91 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
+        # ── إعدادات وتفضيلات إرسال الإعلان المحدثة والمطورة ──
+        if data == "adm_broadcast_menu":
+            db = load_db()
+            b_settings = db.get("broadcast_settings", {"pin": False, "silent": False})
+            pin_st = "مفعل 📌" if b_settings.get("pin") else "معطل ❌"
+            silent_st = "مفعل 🔕" if b_settings.get("silent") else "معطل 🔔"
+            
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(types.InlineKeyboardButton("📣 بدء إرسال الإعلان الآن", callback_data="adm_start_broadcast"))
+            markup.add(
+                types.InlineKeyboardButton(f"📌 تثبيت الإعلان: {pin_st}", callback_data="toggle_broadcast_pin"),
+                types.InlineKeyboardButton(f"🔕 الإرسال بدون إشعار: {silent_st}", callback_data="toggle_broadcast_silent")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            
+            bot.edit_message_text(
+                f"📣 **إدارة وإعدادات إرسال الإعلان:**\n\n"
+                f"• خيار التثبيت لدى المستخدمين: `{pin_st}`\n"
+                f"• الإرسال بدون إشعار صوتي: `{silent_st}`\n\n"
+                f"اختر الإجراء المطلوب:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "toggle_broadcast_pin":
+            db = load_db()
+            b_settings = db.setdefault("broadcast_settings", {"pin": False, "silent": False})
+            b_settings["pin"] = not b_settings.get("pin", False)
+            save_db(db)
+            bot.answer_callback_query(call.id, "✅ تم تغيير إعداد التثبيت بنجاح!")
+            # إعادة تحميل القائمة
+            pin_st = "مفعل 📌" if b_settings["pin"] else "معطل ❌"
+            silent_st = "مفعل 🔕" if b_settings.get("silent") else "معطل 🔔"
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(types.InlineKeyboardButton("📣 بدء إرسال الإعلان الآن", callback_data="adm_start_broadcast"))
+            markup.add(
+                types.InlineKeyboardButton(f"📌 تثبيت الإعلان: {pin_st}", callback_data="toggle_broadcast_pin"),
+                types.InlineKeyboardButton(f"🔕 الإرسال بدون إشعار: {silent_st}", callback_data="toggle_broadcast_silent")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                f"📣 **إدارة وإعدادات إرسال الإعلان:**\n\n"
+                f"• خيار التثبيت لدى المستخدمين: `{pin_st}`\n"
+                f"• الإرسال بدون إشعار صوتي: `{silent_st}`\n\n"
+                f"اختر الإجراء المطلوب:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "toggle_broadcast_silent":
+            db = load_db()
+            b_settings = db.setdefault("broadcast_settings", {"pin": False, "silent": False})
+            b_settings["silent"] = not b_settings.get("silent", False)
+            save_db(db)
+            bot.answer_callback_query(call.id, "✅ تم تغيير إعداد الإشعار الصوتي بنجاح!")
+            pin_st = "مفعل 📌" if b_settings.get("pin") else "معطل ❌"
+            silent_st = "مفعل 🔕" if b_settings["silent"] else "معطل 🔔"
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(types.InlineKeyboardButton("📣 بدء إرسال الإعلان الآن", callback_data="adm_start_broadcast"))
+            markup.add(
+                types.InlineKeyboardButton(f"📌 تثبيت الإعلان: {pin_st}", callback_data="toggle_broadcast_pin"),
+                types.InlineKeyboardButton(f"🔕 الإرسال بدون إشعار: {silent_st}", callback_data="toggle_broadcast_silent")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                f"📣 **إدارة وإعدادات إرسال الإعلان:**\n\n"
+                f"• خيار التثبيت لدى المستخدمين: `{pin_st}`\n"
+                f"• الإرسال بدون إشعار صوتي: `{silent_st}`\n\n"
+                f"اختر الإجراء المطلوب:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "adm_start_broadcast":
+            db = load_db()
+            set_state(uid, WAIT_BROADCAST)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء البث", callback_data="adm_broadcast_menu"))
+            bot.edit_message_text(
+                f"📣 **أرسل الآن رسالة الإعلان للبث إلى جميع المستخدمين ({len(db['users'])} مستخدم):**\n\n"
+                f"(يمكنك إرسال نص، صورة، فيديو، ملف، صوت... وسيتم تطبيق إعدادات التثبيت والإشعار الحالية)\n\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
         # ── إدارة أكواد الهدايا والمسابقات ──
         if data == "adm_gift_codes_menu":
             db = load_db()
@@ -865,7 +951,6 @@ def callback(call):
             save_db(db)
             bot.answer_callback_query(call.id, f"✅ تم حذف الكود ({target_code}) بنجاح!", show_alert=True)
             
-            # العودة للقائمة
             codes_new = db["gift_codes"]
             markup = types.InlineKeyboardMarkup()
             if not codes_new:
@@ -1611,32 +1696,26 @@ def callback(call):
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup(row_width=2)
             
-            # الصف الأول
             markup.add(
                 types.InlineKeyboardButton("📋 قائمة ومعرفات المستخدمين", callback_data="usr_view"),
                 types.InlineKeyboardButton("🔍 البحث عن مستخدم", callback_data="usr_lookup_prompt")
             )
-            # الصف الثاني
             markup.add(
                 types.InlineKeyboardButton("🚫 حظر مستخدم عبر ID", callback_data="usr_ban"),
                 types.InlineKeyboardButton("✅ رفع حظر مستخدم", callback_data="usr_unban")
             )
-            # الصف الثالث
             markup.add(
                 types.InlineKeyboardButton("⏳ حظر مؤقت عبر ID", callback_data="usr_temp_ban"),
                 types.InlineKeyboardButton("🛡️ إعدادات الحظر التلقائي", callback_data="usr_autoban_settings")
             )
-            # الصف الرابع
             markup.add(
                 types.InlineKeyboardButton("📊 الإحصائيات اليومية", callback_data="usr_daily_stats"),
                 types.InlineKeyboardButton("💰 إحصائيات استهلاك النقاط", callback_data="usr_points_consumption")
             )
-            # الصف الخامس
             markup.add(
                 types.InlineKeyboardButton("📈 تفاعل الأزرار والخدمات", callback_data="usr_buttons_interaction"),
                 types.InlineKeyboardButton("🎁 إحصائيات توزيع النقاط", callback_data="usr_points_distribution")
             )
-            # الصف السادس (زرين متناسقين جنباً إلى جنب تماماً كما طلبت)
             markup.add(
                 types.InlineKeyboardButton("⚖️ تعديل رصيد النقاط", callback_data="usr_lookup_prompt"),
                 types.InlineKeyboardButton("🔙 العودة لوحة التحكم", callback_data="adm_back_main")
@@ -1750,15 +1829,6 @@ def callback(call):
                 + "\n\nأرسل ID لرفع حظره:\n/cancel للإلغاء",
             )
 
-        elif data == "adm_broadcast":
-            db = load_db()
-            set_state(uid, WAIT_BROADCAST)
-            bot.send_message(
-                cid,
-                f"📣 أرسل الرسالة للبث إلى {len(db['users'])} مستخدم:\n"
-                f"(يمكنك إرسال نص، صورة، فيديو، ملف...)\n/cancel للإلغاء",
-            )
-
     except Exception as e:
         report_admin_error(e, "callback")
 
@@ -1811,7 +1881,6 @@ def handle_state(message):
             if "gift_codes" not in db:
                 db["gift_codes"] = []
                 
-            # تحقق إذا كان الكود موجود مسبقاً
             for c in db["gift_codes"]:
                 if c["code"] == code_text:
                     bot.send_message(cid, f"⚠️ هذا الكود ({code_text}) موجود مسبقاً! اختر كوداً آخر.")
@@ -1860,11 +1929,9 @@ def handle_state(message):
             
         pts = found_code["points"]
         
-        # إزالة الكود لكي يصبح صالحاً للاستخدام مرة واحدة فقط (لمن يربح أولاً)
         db["gift_codes"] = [c for c in gift_codes if c["code"] != entered_code]
         save_db(db)
         
-        # إضافة النقاط للمستخدم
         users_data = load_users()
         uid_str = str(uid)
         if uid_str not in users_data["users"]:
@@ -2204,21 +2271,47 @@ def handle_state(message):
         clear_state(uid)
 
     elif state == WAIT_BROADCAST:
-        bot.send_message(cid, "⏳ جاري الإرسال...")
+        bot.send_message(cid, "⏳ جاري إرسال الإعلان مع تطبيق الإعدادات الحالية...")
         db = load_db()
+        b_settings = db.get("broadcast_settings", {"pin": False, "silent": False})
+        should_pin = b_settings.get("pin", False)
+        is_silent = b_settings.get("silent", False)
+        
         sent = 0
         failed = 0
         for target_uid in db.get("users", []):
             if target_uid == ADMIN_ID:
                 continue
             try:
-                bot.copy_message(target_uid, cid, message.message_id)
+                sent_msg = bot.copy_message(
+                    target_uid, 
+                    cid, 
+                    message.message_id, 
+                    disable_notification=is_silent
+                )
+                if should_pin:
+                    try:
+                        bot.pin_chat_message(target_uid, sent_msg.message_id)
+                    except Exception:
+                        pass
                 sent += 1
             except Exception as e:
                 logger.exception("Failed to send broadcast message to %s", target_uid)
                 failed += 1
         clear_state(uid)
-        bot.send_message(cid, f"📣 اكتمل البث:\n✅ نجح: {sent}\n❌ فشل: {failed}")
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الإعلان", callback_data="adm_broadcast_menu"))
+        bot.send_message(
+            cid, 
+            f"📣 **اكتمل إرسال الإعلان بنجاح!**\n\n"
+            f"• ✅ نجح الإرسال إلى: `{sent}` مستخدم\n"
+            f"• ❌ فشل الإرسال إلى: `{failed}` مستخدم\n"
+            f"• 📌 التثبيت: {'مفعل' if should_pin else 'معطل'}\n"
+            f"• 🔕 بدون إشعار: {'نعم' if is_silent else 'لا'}",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
 
 
 def save_new_gift_points(message):
