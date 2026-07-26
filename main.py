@@ -144,6 +144,19 @@ def report_admin_error(exc: Exception, context: str = ""):
     except Exception:
         logger.exception("Failed to send error message to ADMIN_ID")
 
+
+def get_display_name(user):
+    """يرجع اسم المستخدم بالضبط كما يظهر في حسابه على تيليجرام (الاسم الأول + الأخير)."""
+    name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
+    if not name:
+        name = f"@{user.username}" if getattr(user, 'username', None) else "صديقنا"
+    return name
+
+
+def main_menu_welcome_text(user):
+    return f"👋 أهلاً بك {get_display_name(user)}! اختر من القائمة:"
+
+
 # ── Force-subscribe channels ────────────────────────────────────
 REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
@@ -230,6 +243,19 @@ def load_db():
     
     res = dict(doc)
     res.pop("_id", None)
+
+    # يضمن أن لكل زر رقم ترتيب (order) ضمن إخوته، حتى الأزرار القديمة التي لا تملكه بعد
+    order_counters = {}
+    order_changed = False
+    for b in res.get("buttons", []):
+        pid = b.get("parent_id")
+        if "order" not in b or not isinstance(b.get("order"), int):
+            b["order"] = order_counters.get(pid, 0)
+            order_changed = True
+        order_counters[pid] = max(order_counters.get(pid, 0), b["order"] + 1)
+    if order_changed:
+        save_db(res)
+
     return res
 
 
@@ -457,7 +483,9 @@ def get_button(db, btn_id):
 
 
 def get_children(db, parent_id):
-    return [b for b in db["buttons"] if b.get("parent_id") == parent_id]
+    children = [b for b in db["buttons"] if b.get("parent_id") == parent_id]
+    children.sort(key=lambda b: b.get("order", 0))
+    return children
 
 
 def collect_descendants(db, btn_id):
@@ -668,6 +696,53 @@ def build_admin_settings_markup(db, parent_id=None):
     return markup
 
 
+def render_button_management_screen(cid, mid, btn_id):
+    """
+    يعرض شاشة إدارة زر/خدمة محدد (تعديل، تصفح الفرعيات، تغيير الترتيب).
+    يُستخدم عند الضغط على الزر من القائمة، وأيضاً بعد تغيير ترتيبه لإعادة عرض
+    الشاشة نفسها محدّثة. يعيد True عند النجاح و False إن لم يعد الزر موجوداً.
+    """
+    db = load_db()
+    btn = get_button(db, btn_id)
+    if not btn:
+        return False
+
+    children = get_children(db, btn_id)
+    siblings = get_children(db, btn.get("parent_id"))
+    position = next((i for i, b in enumerate(siblings) if b["id"] == btn_id), 0)
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("⚙️ تعديل اسم، محتوى أو إعدادات هذا الزر", callback_data=f"adm_edit_{btn_id}")
+    )
+    if children:
+        markup.add(
+            types.InlineKeyboardButton(f"📂 استعراض الأزرار الفرعية بداخله ({len(children)})", callback_data=f"adm_set_subnav_{btn_id}")
+        )
+
+    move_row = []
+    if position > 0:
+        move_row.append(types.InlineKeyboardButton("⬆️ نقل لأعلى", callback_data=f"adm_move_up_{btn_id}"))
+    if position < len(siblings) - 1:
+        move_row.append(types.InlineKeyboardButton("⬇️ نقل لأسفل", callback_data=f"adm_move_down_{btn_id}"))
+    if move_row:
+        markup.row(*move_row)
+
+    markup.add(
+        types.InlineKeyboardButton("🔙 رجوع للقائمة السابقة", callback_data=f"adm_set_back_{btn.get('parent_id') if btn.get('parent_id') else 'root'}")
+    )
+
+    bot.edit_message_text(
+        f"🎛 **إدارة العنصر:** «{btn['name']}»\n\n"
+        f"• النوع: {'قسم رئيسي/فرعي يحتوي على أزرار' if children else 'خدمة / زر نهائي'}\n"
+        f"• عدد الأزرار الفرعية: {len(children)}\n"
+        f"• ترتيبه الحالي في القائمة الرئيسية بين إخوته: {position + 1} من {len(siblings)}\n\n"
+        f"اختر الإجراء المطلوب:",
+        cid, mid, reply_markup=markup, parse_mode="Markdown"
+    )
+    return True
+
+
 # ═══════════════════════════════════════════════════════════════
 # /start
 # ═══════════════════════════════════════════════════════════════
@@ -712,9 +787,9 @@ def start(message):
     process_referral_reward(u.id)
 
     db = load_db()
-    welcome_msg = "أهلاً بك في متجري! اختر من القائمة:"
+    welcome_msg = main_menu_welcome_text(u)
     if bonus_given > 0:
-        welcome_msg = f"🎉 أهلاً بك! لقد حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة).\n\nأهلاً بك في متجري! اختر من القائمة:"
+        welcome_msg = f"🎉 أهلاً بك {get_display_name(u)}! لقد حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة).\n\n" + main_menu_welcome_text(u)
 
     if get_children(db, None):
         bot.send_message(
@@ -733,29 +808,41 @@ def start(message):
 # /admin
 # ═══════════════════════════════════════════════════════════════
 
+ADMIN_PANEL_BUTTONS = [
+    ("⚙️ إعدادات الخدمات والأزرار", "adm_settings_list"),
+    ("🔒 قفل الخدمات بنقاط", "adm_lock_menu"),
+    ("➕ إضافة زر", "adm_add"),
+    ("🗑 حذف زر", "adm_delete"),
+    ("🎁 إعدادات الهدية اليومية", "adm_feat_gift"),
+    ("⭐ إعدادات مكافأة التسجيل", "adm_feat_welcome"),
+    ("🎟️ إدارة أكواد الهدايا والمسابقات", "adm_gift_codes_menu"),
+    ("🔗 إعدادات ميزة الإحالات", "adm_feat_ref"),
+    ("🛡 إدارة الاشتراك الإجباري", "adm_feat_sub"),
+    ("👥 إدارة المستخدمين", "adm_users"),
+    ("📊 إحصائيات البوت", "adm_stats"),
+    ("📣 إرسال إعلان والإعدادات", "adm_broadcast_menu"),
+]
+
+
 def admin_menu_markup():
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("⚙️ إعدادات الخدمات والأزرار", callback_data="adm_settings_list"))
-    markup.add(types.InlineKeyboardButton("📊 إحصائيات البوت", callback_data="adm_stats"))
-    markup.add(types.InlineKeyboardButton("🎁 إعدادات الهدية اليومية", callback_data="adm_feat_gift"))
-    markup.add(types.InlineKeyboardButton("🎟️ إدارة أكواد الهدايا والمسابقات", callback_data="adm_gift_codes_menu"))
-    markup.add(types.InlineKeyboardButton("⭐ إعدادات مكافأة التسجيل", callback_data="adm_feat_welcome"))
-    markup.add(types.InlineKeyboardButton("🔗 إعدادات ميزة الإحالات", callback_data="adm_feat_ref"))
-    markup.add(types.InlineKeyboardButton("🛡 إدارة الاشتراك الإجباري", callback_data="adm_feat_sub"))
-    markup.add(types.InlineKeyboardButton("🔒 قفل الخدمات بنقاط", callback_data="adm_lock_menu"))
-    markup.add(types.InlineKeyboardButton("➕ إضافة زر", callback_data="adm_add"), types.InlineKeyboardButton("🗑 حذف زر", callback_data="adm_delete"))
-    markup.add(types.InlineKeyboardButton("👥 إدارة المستخدمين", callback_data="adm_users"), types.InlineKeyboardButton("📣 إرسال إعلان والإعدادات", callback_data="adm_broadcast_menu"))
+    for i in range(0, len(ADMIN_PANEL_BUTTONS), 2):
+        row = ADMIN_PANEL_BUTTONS[i:i + 2]
+        markup.row(*[types.InlineKeyboardButton(text, callback_data=cb) for text, cb in row])
     return markup
+
+
+def admin_panel_text():
+    return f"👋 أهلاً بك في لوحة التحكم\nعدد الأزرار: {len(ADMIN_PANEL_BUTTONS)}"
 
 @bot.message_handler(commands=["admin"])
 def admin(message):
     if message.from_user.id != ADMIN_ID:
         return
     clear_state(message.from_user.id)
-    db = load_db()
     bot.send_message(
         message.chat.id,
-        f"🔧 لوحة التحكم\nإجمالي الأزرار: {len(db['buttons'])}",
+        admin_panel_text(),
         reply_markup=admin_menu_markup(),
     )
 
@@ -1066,32 +1153,38 @@ def callback(call):
 
         if data.startswith("adm_set_click_"):
             btn_id = data[len("adm_set_click_"):]
+            if not render_button_management_screen(cid, mid, btn_id):
+                bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
+            return
+
+        if data.startswith("adm_move_up_") or data.startswith("adm_move_down_"):
+            direction_up = data.startswith("adm_move_up_")
+            btn_id = data[len("adm_move_up_"):] if direction_up else data[len("adm_move_down_"):]
             db = load_db()
             btn = get_button(db, btn_id)
             if not btn:
                 bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
                 return
-            
-            children = get_children(db, btn_id)
-            markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(
-                types.InlineKeyboardButton("⚙️ تعديل اسم، محتوى أو إعدادات هذا الزر", callback_data=f"adm_edit_{btn_id}")
-            )
-            if children:
-                markup.add(
-                    types.InlineKeyboardButton(f"📂 استعراض الأزرار الفرعية بداخله ({len(children)})", callback_data=f"adm_set_subnav_{btn_id}")
-                )
-            markup.add(
-                types.InlineKeyboardButton("🔙 رجوع للقائمة السابقة", callback_data=f"adm_set_back_{btn.get('parent_id') if btn.get('parent_id') else 'root'}")
-            )
-            
-            bot.edit_message_text(
-                f"🎛 **إدارة العنصر:** «{btn['name']}»\n\n"
-                f"• النوع: {'قسم رئيسي/فرعي يحتوي على أزرار' if children else 'خدمة / زر نهائي'}\n"
-                f"• عدد الأزرار الفرعية: {len(children)}\n\n"
-                f"اختر الإجراء المطلوب:",
-                cid, mid, reply_markup=markup, parse_mode="Markdown"
-            )
+
+            siblings = get_children(db, btn.get("parent_id"))
+            position = next((i for i, b in enumerate(siblings) if b["id"] == btn_id), None)
+            swap_pos = position - 1 if direction_up else position + 1
+
+            if position is None or swap_pos < 0 or swap_pos >= len(siblings):
+                bot.answer_callback_query(call.id, "⚠️ لا يمكن نقل هذا الزر أكثر في هذا الاتجاه.", show_alert=True)
+                return
+
+            other = siblings[swap_pos]
+            this_order = btn.get("order", position)
+            other_order = other.get("order", swap_pos)
+            for b in db["buttons"]:
+                if b["id"] == btn_id:
+                    b["order"] = other_order
+                elif b["id"] == other["id"]:
+                    b["order"] = this_order
+            save_db(db)
+
+            render_button_management_screen(cid, mid, btn_id)
             return
 
         if data.startswith("adm_set_subnav_"):
@@ -1396,7 +1489,7 @@ def callback(call):
             return
 
         if data == "adm_back_main":
-            bot.edit_message_text("👋 أهلاً بك في لوحة التحكم:", call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
+            bot.edit_message_text(admin_panel_text(), call.message.chat.id, call.message.message_id, reply_markup=admin_menu_markup())
             return
 
         if data.startswith("pay_"):
@@ -1452,7 +1545,7 @@ def callback(call):
                 target = data[len("nav_back_") :]
                 parent_id = None if target == "root" else target
                 text = (
-                    "أهلاً بك في متجري! اختر من القائمة:"
+                    main_menu_welcome_text(call.from_user)
                     if parent_id is None
                     else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
                 )
@@ -1558,7 +1651,7 @@ def callback(call):
                 nav_text = "✅ تم التحقق من اشتراكك في القنوات بنجاح!\n"
                 if bonus_given > 0:
                     nav_text += f"🎁 حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)!\n"
-                nav_text += "أهلاً بك في متجري! اختر من القائمة:"
+                nav_text += main_menu_welcome_text(call.from_user)
                 
                 if get_children(db, None):
                     bot.send_message(
@@ -2029,7 +2122,8 @@ def handle_state(message):
                 "caption": caption,
                 "parent_id": parent_id,
                 "unlock_points": 0,
-                "unlock_desc": ""
+                "unlock_desc": "",
+                "order": len(get_children(db, parent_id)),
             }
         )
         save_db(db)
