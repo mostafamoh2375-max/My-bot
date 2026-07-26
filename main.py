@@ -543,6 +543,51 @@ def send_content(cid, btn, back_markup):
             report_admin_error(ex, "send_content")
 
 
+def edit_or_replace(cid, mid, is_current_text, text, markup=None, parse_mode=None):
+    """
+    يعدّل الرسالة الحالية مكانها إذا كانت نصية (بدل إرسال رسالة جديدة).
+    إذا تعذّر التعديل (مثلاً الرسالة الحالية صورة/ملف)، يحذف القديمة ثم يرسل الجديدة
+    بحيث لا تتراكم الرسائل في المحادثة.
+    """
+    if is_current_text:
+        try:
+            bot.edit_message_text(text, cid, mid, reply_markup=markup, parse_mode=parse_mode)
+            return
+        except Exception:
+            pass
+    try:
+        bot.delete_message(cid, mid)
+    except Exception:
+        pass
+    bot.send_message(cid, text, reply_markup=markup, parse_mode=parse_mode)
+
+
+def show_leaf_content(cid, mid, is_current_text, btn, back_markup):
+    """
+    يعرض محتوى زر نهائي (خدمة/ميزة بدون قوائم فرعية) مكان الرسالة الحالية:
+    - إذا كان المحتوى نصاً والرسالة الحالية نصية أيضاً: يعدّل الرسالة مكانها.
+    - غير ذلك (تحويل من نص إلى صورة/ملف أو العكس): يحذف الرسالة القديمة ثم يرسل
+      المحتوى الجديد، بحيث تبقى رسالة واحدة فقط بدل تراكم الرسائل.
+    """
+    ct = btn.get("content_type", "text")
+    content = btn.get("content", "")
+    name = btn.get("name", "")
+
+    if ct == "text" and is_current_text:
+        text = content if content else f"ℹ️ {name}\n\n(لا يوجد محتوى بعد.)"
+        try:
+            bot.edit_message_text(text, cid, mid, reply_markup=back_markup)
+            return
+        except Exception:
+            pass
+
+    try:
+        bot.delete_message(cid, mid)
+    except Exception:
+        pass
+    send_content(cid, btn, back_markup)
+
+
 # ═══════════════════════════════════════════════════════════════
 # NAVIGATION MARKUP
 # ═══════════════════════════════════════════════════════════════
@@ -798,6 +843,7 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
+        # ── إعدادات وتفضيلات إرسال الإعلان المحدثة والمطورة ──
         if data == "adm_broadcast_menu":
             db = load_db()
             b_settings = db.get("broadcast_settings", {"pin": False, "silent": False})
@@ -881,6 +927,7 @@ def callback(call):
             )
             return
 
+        # ── إدارة أكواد الهدايا والمسابقات ──
         if data == "adm_gift_codes_menu":
             db = load_db()
             codes = db.get("gift_codes", [])
@@ -963,15 +1010,16 @@ def callback(call):
             set_state(uid, WAIT_ENTER_GIFT_CODE)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="nav_back_root"))
-            bot.send_message(
-                cid,
+            edit_or_replace(
+                cid, mid, call.message.content_type == "text",
                 "🎟️ **استبدال كود الهدية أو المسابقة:**\n\n"
                 "أرسل الآن الكود الذي حصلت عليه في المسابقة لاستلام نقاطك فوراً:\n/cancel للإلغاء",
-                reply_markup=markup,
-                parse_mode="Markdown"
+                markup=markup,
+                parse_mode="Markdown",
             )
             return
 
+        # ── إحصائيات البوت الشاملة ──
         if data == "adm_stats":
             db = load_db()
             users_data = load_users()
@@ -1265,7 +1313,9 @@ def callback(call):
                 f"{top_text}"
             )
             
-            bot.send_message(cid, ref_msg)
+            back_markup = types.InlineKeyboardMarkup()
+            back_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
+            edit_or_replace(cid, mid, call.message.content_type == "text", ref_msg, markup=back_markup)
             return
 
         if data == "change_sub_name":
@@ -1430,8 +1480,9 @@ def callback(call):
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
                 
+                is_current_text = call.message.content_type == "text"
                 if uid == ADMIN_ID:
-                    send_content(cid, btn, back_only_markup(btn))
+                    show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn))
                 elif unlock_pts > 0:
                     users_db = load_users()
                     uid_str = str(uid)
@@ -1439,7 +1490,7 @@ def callback(call):
                     user_unlocked = user_data_db.get("unlocked", [])
                     
                     if btn_id in user_unlocked:
-                        send_content(cid, btn, back_only_markup(btn))
+                        show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn))
                     else:
                         desc = btn.get("unlock_desc", "هذا المحتوى حصري ومقفول.")
                         markup = types.InlineKeyboardMarkup()
@@ -1457,16 +1508,18 @@ def callback(call):
                         else:
                             bot.edit_message_text(payment_text, cid, mid, reply_markup=markup, parse_mode="Markdown")
                 else:
-                    send_content(cid, btn, back_only_markup(btn))
+                    show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn))
             return
 
         if data == "gift_claim":
             db = load_db()
+            back_markup = types.InlineKeyboardMarkup()
+            back_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
             if not db.get("gift_active", True):
-                bot.send_message(cid, "⚠️ خدمة الهدية اليومية متوقفة مؤقتاً من قبل الإدارة.")
-                return
-            success, msg = claim_daily_gift(uid)
-            bot.send_message(cid, msg)
+                msg = "⚠️ خدمة الهدية اليومية متوقفة مؤقتاً من قبل الإدارة."
+            else:
+                success, msg = claim_daily_gift(uid)
+            edit_or_replace(cid, mid, call.message.content_type == "text", msg, markup=back_markup)
             return
 
         if data == "sub_check":
@@ -1687,6 +1740,7 @@ def callback(call):
             extra = f" وو {total} زر فرعي" if total else ""
             bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
 
+        # ── إدارة المستخدمين المحدثة بالكامل ──
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup(row_width=2)
             
@@ -2371,51 +2425,42 @@ def process_add_channel(message):
         
         bot_member = bot.get_chat_member(ch, bot.get_me().id)
         if bot_member.status not in ('administrator', 'creator'):
-            bot.send_message(cid, f"❌ خطأ الشروط: البوت ليس مشرفاً (Admin) في القناة {ch}!\nيرجى رفع البوت مشرفاً أولاً ثم المحاولة مجدداً.")
+            bot.send_message(cid, "❌ خطأ الشروط: البوت ليس مشرفاً في هذه القناة! أضفه مشرفاً أولاً.")
             return
         
         db = load_db()
-        channels = db.get("sub_channels", REQUIRED_CHANNELS.copy())
-        if ch in channels:
-            bot.send_message(cid, f"⚠️ القناة {ch} مضافة مسبقاً في قائمة الاشتراك الإجباري.")
+        if "sub_channels" not in db:
+            db["sub_channels"] = REQUIRED_CHANNELS.copy()
+        
+        existing_channels = db["sub_channels"]
+        if any(c.lower() == ch.lower() for c in existing_channels):
+            bot.send_message(cid, f"⚠️ هذه القناة ({ch}) مضافة مسبقاً في القائمة.")
             return
         
-        channels.append(ch)
-        db["sub_channels"] = channels
+        db["sub_channels"].append(ch)
         save_db(db)
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الاشتراك", callback_data="adm_feat_sub"))
-        bot.send_message(cid, f"✅ تم إضافة القناة {ch} بنجاح إلى قائمة الاشتراك الإجباري!", reply_markup=markup)
+        bot.send_message(
+            cid, 
+            f"✅ تمت إضافة القناة بنجاح واجتازت كافة الشروط!\n\n"
+            f"• اسم القناة: {chat_info.title}\n"
+            f"• المعرف: {ch}"
+        )
     except Exception as e:
-        logger.exception("Error adding channel: %s", e)
-        bot.send_message(cid, f"❌ حدث خطأ أثناء التحقق من القناة: تأكد أن المعرف صحيح وأن البوت تمت إضافته كمشرف.\nالتفاصيل: {str(e)[:100]}")
+        logger.exception("Failed to add channel %s: %s", ch, e)
+        bot.send_message(cid, "❌ خطأ في التحقق من القناة! تأكد من صحة المعرف وأن البوت مشرف فيها.")
 
 
 def process_remove_channel(message):
-    cid = message.chat.id
-    raw_text = message.text.strip()
-    
-    ch = raw_text
-    if "t.me/" in ch:
-        ch = "@" + ch.split("t.me/")[-1].split("/")[0].strip()
-    elif not ch.startswith("@"):
-        ch = "@" + ch
-        
+    ch = message.text.strip()
     db = load_db()
-    channels = db.get("sub_channels", REQUIRED_CHANNELS.copy())
-    
-    if ch not in channels:
-        bot.send_message(cid, f"⚠️ القناة {ch} غير موجودة حالياً في قائمة الاشتراك.")
-        return
-        
-    channels.remove(ch)
-    db["sub_channels"] = channels
-    save_db(db)
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الاشتراك", callback_data="adm_feat_sub"))
-    bot.send_message(cid, f"✅ تم إزالة القناة {ch} من قائمة الاشتراك الإجباري بنجاح!", reply_markup=markup)
+    channels = db.get("sub_channels", REQUIRED_CHANNELS)
+    if ch in channels:
+        channels.remove(ch)
+        db["sub_channels"] = channels
+        save_db(db)
+        bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
+    else:
+        bot.send_message(message.chat.id, "❌ هذه القناة غير موجودة في القائمة الحالية.")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2433,3 +2478,4 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
+            
