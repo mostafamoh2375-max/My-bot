@@ -798,7 +798,6 @@ def callback(call):
         cid = call.message.chat.id
         mid = call.message.message_id
 
-        # ── إعدادات وتفضيلات إرسال الإعلان المحدثة والمطورة ──
         if data == "adm_broadcast_menu":
             db = load_db()
             b_settings = db.get("broadcast_settings", {"pin": False, "silent": False})
@@ -882,7 +881,6 @@ def callback(call):
             )
             return
 
-        # ── إدارة أكواد الهدايا والمسابقات ──
         if data == "adm_gift_codes_menu":
             db = load_db()
             codes = db.get("gift_codes", [])
@@ -974,7 +972,6 @@ def callback(call):
             )
             return
 
-        # ── إحصائيات البوت الشاملة ──
         if data == "adm_stats":
             db = load_db()
             users_data = load_users()
@@ -1690,7 +1687,6 @@ def callback(call):
             extra = f" وو {total} زر فرعي" if total else ""
             bot.send_message(cid, f"✅ تم حذف «{btn['name']}»{extra} بنجاح.")
 
-        # ── إدارة المستخدمين المحدثة بالكامل ──
         elif data == "adm_users":
             markup = types.InlineKeyboardMarkup(row_width=2)
             
@@ -2375,42 +2371,51 @@ def process_add_channel(message):
         
         bot_member = bot.get_chat_member(ch, bot.get_me().id)
         if bot_member.status not in ('administrator', 'creator'):
-            bot.send_message(cid, "❌ خطأ الشروط: البوت ليس مشرفاً في هذه القناة! أضفه مشرفاً أولاً.")
+            bot.send_message(cid, f"❌ خطأ الشروط: البوت ليس مشرفاً (Admin) في القناة {ch}!\nيرجى رفع البوت مشرفاً أولاً ثم المحاولة مجدداً.")
             return
         
         db = load_db()
-        if "sub_channels" not in db:
-            db["sub_channels"] = REQUIRED_CHANNELS.copy()
-        
-        existing_channels = db["sub_channels"]
-        if any(c.lower() == ch.lower() for c in existing_channels):
-            bot.send_message(cid, f"⚠️ هذه القناة ({ch}) مضافة مسبقاً في القائمة.")
+        channels = db.get("sub_channels", REQUIRED_CHANNELS.copy())
+        if ch in channels:
+            bot.send_message(cid, f"⚠️ القناة {ch} مضافة مسبقاً في قائمة الاشتراك الإجباري.")
             return
         
-        db["sub_channels"].append(ch)
+        channels.append(ch)
+        db["sub_channels"] = channels
         save_db(db)
-        bot.send_message(
-            cid, 
-            f"✅ تمت إضافة القناة بنجاح واجتازت كافة الشروط!\n\n"
-            f"• اسم القناة: {chat_info.title}\n"
-            f"• المعرف: {ch}"
-        )
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الاشتراك", callback_data="adm_feat_sub"))
+        bot.send_message(cid, f"✅ تم إضافة القناة {ch} بنجاح إلى قائمة الاشتراك الإجباري!", reply_markup=markup)
     except Exception as e:
-        logger.exception("Failed to add channel %s: %s", ch, e)
-        bot.send_message(cid, "❌ خطأ في التحقق من القناة! تأكد من صحة المعرف وأن البوت مشرف فيها.")
+        logger.exception("Error adding channel: %s", e)
+        bot.send_message(cid, f"❌ حدث خطأ أثناء التحقق من القناة: تأكد أن المعرف صحيح وأن البوت تمت إضافته كمشرف.\nالتفاصيل: {str(e)[:100]}")
 
 
 def process_remove_channel(message):
-    ch = message.text.strip()
+    cid = message.chat.id
+    raw_text = message.text.strip()
+    
+    ch = raw_text
+    if "t.me/" in ch:
+        ch = "@" + ch.split("t.me/")[-1].split("/")[0].strip()
+    elif not ch.startswith("@"):
+        ch = "@" + ch
+        
     db = load_db()
-    channels = db.get("sub_channels", REQUIRED_CHANNELS)
-    if ch in channels:
-        channels.remove(ch)
-        db["sub_channels"] = channels
-        save_db(db)
-        bot.send_message(message.chat.id, f"✅ تم إزالة القناة ({ch}) بنجاح.")
-    else:
-        bot.send_message(message.chat.id, "❌ هذه القناة غير موجودة في القائمة الحالية.")
+    channels = db.get("sub_channels", REQUIRED_CHANNELS.copy())
+    
+    if ch not in channels:
+        bot.send_message(cid, f"⚠️ القناة {ch} غير موجودة حالياً في قائمة الاشتراك.")
+        return
+        
+    channels.remove(ch)
+    db["sub_channels"] = channels
+    save_db(db)
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔙 عودة لإعدادات الاشتراك", callback_data="adm_feat_sub"))
+    bot.send_message(cid, f"✅ تم إزالة القناة {ch} من قائمة الاشتراك الإجباري بنجاح!", reply_markup=markup)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2428,4 +2433,3 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
-
