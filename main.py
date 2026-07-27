@@ -175,6 +175,8 @@ WAIT_UNBAN = "WAIT_UNBAN"
 WAIT_TEMP_BAN = "WAIT_TEMP_BAN"
 WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
 WAIT_REF_NAME = "WAIT_REF_NAME"
+WAIT_GIFTCODE_BTN_NAME = "WAIT_GIFTCODE_BTN_NAME"
+WAIT_MYINFO_BTN_NAME = "WAIT_MYINFO_BTN_NAME"
 WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
@@ -224,7 +226,9 @@ DEFAULT_CONFIG = {
     "welcome_points": 1,
     "welcome_name": "مكافأة التسجيل",
     "gift_codes": [],
-    "broadcast_settings": {"pin": False, "silent": False}
+    "broadcast_settings": {"pin": False, "silent": False},
+    "gift_code_btn_name": "🎟️ كود هدية 🎁",
+    "my_info_btn_name": "👤 معلوماتي"
 }
 
 def load_db():
@@ -646,11 +650,14 @@ def build_nav_markup(db, parent_id=None):
         db_data = load_db()
         gift_name = db_data.get("gift_name", "الهدية اليومية")
         ref_name = db_data.get("ref_name", "رابط الإحالة")
+        gift_code_btn_name = db_data.get("gift_code_btn_name", "🎟️ كود هدية 🎁")
+        my_info_btn_name = db_data.get("my_info_btn_name", "👤 معلوماتي")
         markup.add(
             types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
             types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info")
         )
-        markup.add(types.InlineKeyboardButton("🎟️ كود هدية 🎁", callback_data="gift_code_prompt"))
+        markup.add(types.InlineKeyboardButton(gift_code_btn_name, callback_data="gift_code_prompt"))
+        markup.add(types.InlineKeyboardButton(my_info_btn_name, callback_data="my_info"))
     return markup
 
 
@@ -692,6 +699,7 @@ def build_admin_settings_markup(db, parent_id=None):
             types.InlineKeyboardButton("🔙 رجوع", callback_data=f"adm_set_back_{back_to if back_to else 'root'}")
         )
     else:
+        markup.add(types.InlineKeyboardButton("✏️ تعديل نصوص أزرار القائمة الرئيسية الثابتة", callback_data="adm_fixed_texts"))
         markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
     return markup
 
@@ -1142,6 +1150,50 @@ def callback(call):
             )
             return
 
+        if data == "adm_fixed_texts":
+            db = load_db()
+            gift_name = db.get("gift_name", "الهدية اليومية")
+            ref_name = db.get("ref_name", "رابط الإحالة")
+            gift_code_btn_name = db.get("gift_code_btn_name", "🎟️ كود هدية 🎁")
+            my_info_btn_name = db.get("my_info_btn_name", "👤 معلوماتي")
+
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="edit_gift_name"))
+            markup.add(types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="edit_ref_name"))
+            markup.add(types.InlineKeyboardButton(gift_code_btn_name, callback_data="edit_giftcode_btn_name"))
+            markup.add(types.InlineKeyboardButton(my_info_btn_name, callback_data="edit_myinfo_btn_name"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_settings_list"))
+
+            bot.edit_message_text(
+                "✏️ **تعديل نصوص أزرار القائمة الرئيسية الثابتة:**\n\n"
+                "هذه الأزرار (الهدية، الإحالة، كود الهدية، معلوماتي) ثابتة دائماً في القائمة الرئيسية "
+                "بجانب الخدمات التي تضيفها بنفسك. اضغط على أي زر أدناه لتغيير نصه:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data == "edit_giftcode_btn_name":
+            set_state(uid, WAIT_GIFTCODE_BTN_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_fixed_texts"))
+            try:
+                bot.delete_message(cid, mid)
+            except Exception:
+                pass
+            bot.send_message(cid, "✍️ أرسل الآن النص الجديد لزر «كود هدية» في القائمة الرئيسية:", reply_markup=markup)
+            return
+
+        if data == "edit_myinfo_btn_name":
+            set_state(uid, WAIT_MYINFO_BTN_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_fixed_texts"))
+            try:
+                bot.delete_message(cid, mid)
+            except Exception:
+                pass
+            bot.send_message(cid, "✍️ أرسل الآن النص الجديد لزر «معلوماتي» في القائمة الرئيسية:", reply_markup=markup)
+            return
+
         if data.startswith("adm_set_back_"):
             db = load_db()
             target = data[len("adm_set_back_"):]
@@ -1409,6 +1461,67 @@ def callback(call):
             back_markup = types.InlineKeyboardMarkup()
             back_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
             edit_or_replace(cid, mid, call.message.content_type == "text", ref_msg, markup=back_markup)
+            return
+
+        if data == "my_info":
+            users_data = load_users()
+            uid_str = str(uid)
+            user_rec = users_data["users"].get(uid_str, {})
+            display_name = get_display_name(call.from_user)
+            points = user_rec.get("points", 0)
+            my_invites = user_rec.get("referrals_count", 0)
+
+            all_users = users_data.get("users", {})
+            sorted_users = sorted(
+                all_users.items(),
+                key=lambda item: item[1].get("referrals_count", 0),
+                reverse=True
+            )
+            rank = next((i + 1 for i, (u_id, _) in enumerate(sorted_users) if u_id == uid_str), len(sorted_users))
+
+            info_text = (
+                f"👤 **معلوماتي:**\n\n"
+                f"👤 الاسم: {display_name}\n"
+                f"🆔 الآيدي: `{uid}`\n"
+                f"🌟 نقاطك الحالية: {points}\n"
+                f"🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {my_invites} دعوة)"
+            )
+
+            info_markup = types.InlineKeyboardMarkup(row_width=1)
+            info_markup.add(types.InlineKeyboardButton("ما فُتح من أزرار📮", callback_data="my_unlocked"))
+            info_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
+            edit_or_replace(cid, mid, call.message.content_type == "text", info_text, markup=info_markup, parse_mode="Markdown")
+            return
+
+        if data == "my_unlocked":
+            db = load_db()
+            users_data = load_users()
+            uid_str = str(uid)
+            user_rec = users_data["users"].get(uid_str, {})
+            unlocked_ids = user_rec.get("unlocked", [])
+
+            lines = []
+            total_points = 0
+            for btn_id in unlocked_ids:
+                btn = get_button(db, btn_id)
+                if not btn:
+                    continue
+                pts = int(btn.get("unlock_points", 0))
+                total_points += pts
+                lines.append(f"• {btn['name']} — {pts} نقطة")
+
+            if lines:
+                body = (
+                    f"🔓 عدد الخدمات المقفولة التي فتحتها: {len(lines)}\n"
+                    f"💰 إجمالي النقاط التي دفعتها لفتحها: {total_points}\n\n"
+                    + "\n".join(lines)
+                )
+            else:
+                body = "لم يتم فتح ميزة/خدمة مقفلة إلى الآن (حالياً)."
+
+            unlocked_markup = types.InlineKeyboardMarkup()
+            unlocked_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="my_info"))
+            edit_or_replace(cid, mid, call.message.content_type == "text", body, markup=unlocked_markup)
             return
 
         if data == "change_sub_name":
@@ -2328,6 +2441,46 @@ def handle_state(message):
         bot.send_message(
             cid, 
             f"✅ **تم تغيير اسم خدمة الإحالة بنجاح!**\n\n• الاسم الجديد: {new_name}", 
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    elif state == WAIT_GIFTCODE_BTN_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل النص كرسالة نصية من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        db["gift_code_btn_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة", callback_data="adm_fixed_texts"))
+        bot.send_message(
+            cid,
+            f"✅ **تم تغيير نص زر «كود هدية» بنجاح!**\n\n• النص الجديد: {new_name}",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    elif state == WAIT_MYINFO_BTN_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل النص كرسالة نصية من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        db["my_info_btn_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة", callback_data="adm_fixed_texts"))
+        bot.send_message(
+            cid,
+            f"✅ **تم تغيير نص زر «معلوماتي» بنجاح!**\n\n• النص الجديد: {new_name}",
             reply_markup=markup,
             parse_mode="Markdown"
         )
