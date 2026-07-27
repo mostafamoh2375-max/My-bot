@@ -228,7 +228,38 @@ DEFAULT_CONFIG = {
     "gift_codes": [],
     "broadcast_settings": {"pin": False, "silent": False},
     "gift_code_btn_name": "🎟️ كود هدية 🎁",
-    "my_info_btn_name": "👤 معلوماتي"
+    "my_info_btn_name": "👤 معلوماتي",
+    "gift_claim_text_template": "🎁 تهانينا! حصلت على {points} نقاط من ({gift_name})!\nرصيدك الحالي: {balance} نقطة 🌟",
+    "ref_info_text_template": "رابط الدعوة ( {ref_link} )\n\nعدد دعوتك ( {my_invites} )\n\nافضل توب 5 بعدد دعوات\n{top_text}",
+    "gift_code_prompt_text_template": "🎟️ **استبدال كود الهدية أو المسابقة:**\n\nأرسل الآن الكود الذي حصلت عليه في المسابقة لاستلام نقاطك فوراً:\n/cancel للإلغاء",
+    "my_info_text_template": "👤 **معلوماتي:**\n\n👤 الاسم: {name}\n🆔 الآيدي: `{id}`\n🌟 نقاطك الحالية: {points}\n🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {invites} دعوة)"
+}
+
+FIXED_ITEMS = {
+    "gift": {
+        "label": "🎁 الهدية اليومية",
+        "name_cb": "edit_gift_name",
+        "text_key": "gift_claim_text_template",
+        "placeholders": "{points} → عدد النقاط الممنوحة\n{gift_name} → اسم الخدمة\n{balance} → رصيد النقاط الحالي بعد الاستلام",
+    },
+    "ref": {
+        "label": "🔗 رابط الإحالة",
+        "name_cb": "edit_ref_name",
+        "text_key": "ref_info_text_template",
+        "placeholders": "{ref_link} → رابط دعوة المستخدم\n{my_invites} → عدد دعوات المستخدم\n{top_text} → قائمة أفضل 5 بالدعوات",
+    },
+    "giftcode": {
+        "label": "🎟️ كود هدية",
+        "name_cb": "edit_giftcode_btn_name",
+        "text_key": "gift_code_prompt_text_template",
+        "placeholders": "لا توجد متغيرات — هذا نص ثابت.",
+    },
+    "myinfo": {
+        "label": "👤 معلوماتي",
+        "name_cb": "edit_myinfo_btn_name",
+        "text_key": "my_info_text_template",
+        "placeholders": "{name} → اسم المستخدم\n{id} → آيدي المستخدم\n{points} → نقاطه الحالية\n{rank} → ترتيبه في الإحالات\n{invites} → عدد دعواته",
+    },
 }
 
 def load_db():
@@ -473,10 +504,12 @@ def claim_daily_gift(user_id):
     save_users(users_data)
     
     gift_name = db.get("gift_name", "الهدية اليومية")
-    return True, (
-        f"🎁 تهانينا! حصلت على {current_gift_points} نقاط من ({gift_name})!\n"
-        f"رصيدك الحالي: {user['points']} نقطة 🌟"
-    )
+    template = db.get("gift_claim_text_template", DEFAULT_CONFIG["gift_claim_text_template"])
+    try:
+        msg_text = template.format(points=current_gift_points, gift_name=gift_name, balance=user['points'])
+    except Exception:
+        msg_text = DEFAULT_CONFIG["gift_claim_text_template"].format(points=current_gift_points, gift_name=gift_name, balance=user['points'])
+    return True, msg_text
 
 
 def get_button(db, btn_id):
@@ -1105,10 +1138,11 @@ def callback(call):
             set_state(uid, WAIT_ENTER_GIFT_CODE)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="nav_back_root"))
+            db_local = load_db()
+            prompt_text = db_local.get("gift_code_prompt_text_template", DEFAULT_CONFIG["gift_code_prompt_text_template"])
             edit_or_replace(
                 cid, mid, call.message.content_type == "text",
-                "🎟️ **استبدال كود الهدية أو المسابقة:**\n\n"
-                "أرسل الآن الكود الذي حصلت عليه في المسابقة لاستلام نقاطك فوراً:\n/cancel للإلغاء",
+                prompt_text,
                 markup=markup,
                 parse_mode="Markdown",
             )
@@ -1151,24 +1185,55 @@ def callback(call):
             return
 
         if data == "adm_fixed_texts":
-            db = load_db()
-            gift_name = db.get("gift_name", "الهدية اليومية")
-            ref_name = db.get("ref_name", "رابط الإحالة")
-            gift_code_btn_name = db.get("gift_code_btn_name", "🎟️ كود هدية 🎁")
-            my_info_btn_name = db.get("my_info_btn_name", "👤 معلوماتي")
-
             markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="edit_gift_name"))
-            markup.add(types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="edit_ref_name"))
-            markup.add(types.InlineKeyboardButton(gift_code_btn_name, callback_data="edit_giftcode_btn_name"))
-            markup.add(types.InlineKeyboardButton(my_info_btn_name, callback_data="edit_myinfo_btn_name"))
+            for key, item in FIXED_ITEMS.items():
+                markup.add(types.InlineKeyboardButton(item["label"], callback_data=f"adm_fixed_item_{key}"))
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_settings_list"))
 
             bot.edit_message_text(
-                "✏️ **تعديل نصوص أزرار القائمة الرئيسية الثابتة:**\n\n"
+                "✏️ **إدارة أزرار القائمة الرئيسية الثابتة:**\n\n"
                 "هذه الأزرار (الهدية، الإحالة، كود الهدية، معلوماتي) ثابتة دائماً في القائمة الرئيسية "
-                "بجانب الخدمات التي تضيفها بنفسك. اضغط على أي زر أدناه لتغيير نصه:",
+                "بجانب الخدمات التي تضيفها بنفسك. اختر الزر الذي تريد إدارته:",
                 cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("adm_fixed_item_"):
+            key = data[len("adm_fixed_item_"):]
+            item = FIXED_ITEMS.get(key)
+            if not item:
+                bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
+                return
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(types.InlineKeyboardButton("📝 تعديل اسم الزر (كما يظهر في القائمة)", callback_data=item["name_cb"]))
+            markup.add(types.InlineKeyboardButton("📄 تعديل النص الذي يظهر عند الضغط عليه", callback_data=f"adm_fixed_text_{key}"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_fixed_texts"))
+            bot.edit_message_text(
+                f"⚙️ **إدارة زر:** «{item['label']}»\n\nاختر ما تريد تعديله:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("adm_fixed_text_"):
+            key = data[len("adm_fixed_text_"):]
+            item = FIXED_ITEMS.get(key)
+            if not item:
+                bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
+                return
+            set_state(uid, "WAIT_FIXED_TEXT_EDIT", config_key=item["text_key"], back_key=key)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data=f"adm_fixed_item_{key}"))
+            current_text = load_db().get(item["text_key"], "")
+            try:
+                bot.delete_message(cid, mid)
+            except Exception:
+                pass
+            bot.send_message(
+                cid,
+                f"✍️ أرسل الآن النص الجديد لـ «{item['label']}».\n\n"
+                f"📌 المتغيرات المتاحة (اختياري استخدامها داخل النص):\n{item['placeholders']}\n\n"
+                f"📄 النص الحالي:\n{current_text}",
+                reply_markup=markup
             )
             return
 
@@ -1451,12 +1516,12 @@ def callback(call):
             
             top_text = "\n".join(top_lines) if top_lines else "لا يوجد مستخدمون بعد."
             
-            ref_msg = (
-                f"رابط الدعوة ( {ref_link} )\n\n"
-                f"عدد دعوتك ( {my_invites} )\n\n"
-                f"افضل توب 5 بعدد دعوات\n"
-                f"{top_text}"
-            )
+            db_local = load_db()
+            ref_template = db_local.get("ref_info_text_template", DEFAULT_CONFIG["ref_info_text_template"])
+            try:
+                ref_msg = ref_template.format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
+            except Exception:
+                ref_msg = DEFAULT_CONFIG["ref_info_text_template"].format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
             
             back_markup = types.InlineKeyboardMarkup()
             back_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
@@ -1479,13 +1544,12 @@ def callback(call):
             )
             rank = next((i + 1 for i, (u_id, _) in enumerate(sorted_users) if u_id == uid_str), len(sorted_users))
 
-            info_text = (
-                f"👤 **معلوماتي:**\n\n"
-                f"👤 الاسم: {display_name}\n"
-                f"🆔 الآيدي: `{uid}`\n"
-                f"🌟 نقاطك الحالية: {points}\n"
-                f"🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {my_invites} دعوة)"
-            )
+            db_local = load_db()
+            info_template = db_local.get("my_info_text_template", DEFAULT_CONFIG["my_info_text_template"])
+            try:
+                info_text = info_template.format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
+            except Exception:
+                info_text = DEFAULT_CONFIG["my_info_text_template"].format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
 
             info_markup = types.InlineKeyboardMarkup(row_width=1)
             info_markup.add(types.InlineKeyboardButton("ما فُتح من أزرار📮", callback_data="my_unlocked"))
@@ -2484,6 +2548,25 @@ def handle_state(message):
             reply_markup=markup,
             parse_mode="Markdown"
         )
+        return
+
+    elif state == "WAIT_FIXED_TEXT_EDIT":
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل النص كرسالة نصية من فضلك.")
+            return
+        d = get_data(uid)
+        config_key = d.get("config_key")
+        back_key = d.get("back_key")
+        new_text = message.text
+        db = load_db()
+        if config_key:
+            db[config_key] = new_text
+            save_db(db)
+        clear_state(uid)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data=f"adm_fixed_item_{back_key}" if back_key else "adm_fixed_texts"))
+        bot.send_message(cid, "✅ تم تحديث النص بنجاح!", reply_markup=markup)
         return
         
     elif state == "WAIT_DYNAMIC_BTN_EDIT":
