@@ -160,6 +160,81 @@ def main_menu_welcome_text(user):
 # ── Force-subscribe channels ────────────────────────────────────
 REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 
+
+def flag(country_code):
+    """يحوّل رمز الدولة الدولي (مثل EG) إلى إيموجي علمها تلقائياً."""
+    return "".join(chr(0x1F1E6 + ord(c) - ord('A')) for c in country_code.upper())
+
+
+# قائمة دول العالم مقسّمة حسب القارة: (رمز الدولة، الاسم بالعربية)
+COUNTRIES_BY_CONTINENT = [
+    ("🌏 آسيا", [
+        ("SA", "السعودية"), ("AE", "الإمارات"), ("QA", "قطر"), ("KW", "الكويت"),
+        ("BH", "البحرين"), ("OM", "عُمان"), ("YE", "اليمن"), ("IQ", "العراق"),
+        ("SY", "سوريا"), ("LB", "لبنان"), ("JO", "الأردن"), ("PS", "فلسطين"),
+        ("TR", "تركيا"), ("IR", "إيران"), ("IL", "إسرائيل"), ("CY", "قبرص"),
+        ("CN", "الصين"), ("JP", "اليابان"), ("KR", "كوريا الجنوبية"), ("KP", "كوريا الشمالية"),
+        ("IN", "الهند"), ("PK", "باكستان"), ("BD", "بنغلاديش"), ("LK", "سريلانكا"),
+        ("NP", "نيبال"), ("BT", "بوتان"), ("MV", "جزر المالديف"), ("MM", "ميانمار"),
+        ("TH", "تايلاند"), ("VN", "فيتنام"), ("LA", "لاوس"), ("KH", "كمبوديا"),
+        ("MY", "ماليزيا"), ("SG", "سنغافورة"), ("ID", "إندونيسيا"), ("PH", "الفلبين"),
+        ("BN", "بروناي"), ("TL", "تيمور الشرقية"), ("MN", "منغوليا"), ("KZ", "كازاخستان"),
+        ("UZ", "أوزبكستان"), ("TM", "تركمانستان"), ("TJ", "طاجيكستان"), ("KG", "قيرغيزستان"),
+        ("AF", "أفغانستان"), ("AZ", "أذربيجان"), ("AM", "أرمينيا"), ("GE", "جورجيا"),
+    ]),
+    ("🌍 أفريقيا", [
+        ("EG", "مصر"), ("LY", "ليبيا"), ("TN", "تونس"), ("DZ", "الجزائر"),
+        ("MA", "المغرب"), ("SD", "السودان"), ("SS", "جنوب السودان"), ("ET", "إثيوبيا"),
+        ("ER", "إريتريا"), ("DJ", "جيبوتي"), ("SO", "الصومال"), ("KE", "كينيا"),
+        ("TZ", "تنزانيا"), ("UG", "أوغندا"), ("RW", "رواندا"), ("BI", "بوروندي"),
+        ("NG", "نيجيريا"), ("GH", "غانا"), ("CI", "ساحل العاج"), ("SN", "السنغال"),
+        ("ML", "مالي"), ("NE", "النيجر"), ("TD", "تشاد"), ("MR", "موريتانيا"),
+        ("GM", "غامبيا"), ("GW", "غينيا بيساو"), ("GN", "غينيا"), ("SL", "سيراليون"),
+        ("LR", "ليبيريا"), ("TG", "توغو"), ("BJ", "بنين"), ("BF", "بوركينا فاسو"),
+        ("CM", "الكاميرون"), ("GA", "الغابون"), ("CG", "الكونغو برازافيل"), ("CD", "الكونغو الديمقراطية"),
+        ("CF", "أفريقيا الوسطى"), ("GQ", "غينيا الاستوائية"), ("ST", "ساو تومي وبرينسيبي"), ("AO", "أنغولا"),
+        ("ZM", "زامبيا"), ("ZW", "زيمبابوي"), ("MZ", "موزمبيق"), ("MW", "مالاوي"),
+        ("NA", "ناميبيا"), ("BW", "بوتسوانا"), ("ZA", "جنوب أفريقيا"), ("SZ", "إسواتيني"),
+        ("LS", "ليسوتو"), ("MG", "مدغشقر"), ("MU", "موريشيوس"), ("SC", "سيشل"),
+        ("KM", "جزر القمر"), ("CV", "الرأس الأخضر"),
+    ]),
+    ("🌍 أوروبا", [
+        ("GB", "المملكة المتحدة"), ("IE", "أيرلندا"), ("FR", "فرنسا"), ("DE", "ألمانيا"),
+        ("NL", "هولندا"), ("BE", "بلجيكا"), ("LU", "لوكسمبورغ"), ("CH", "سويسرا"),
+        ("AT", "النمسا"), ("ES", "إسبانيا"), ("PT", "البرتغال"), ("IT", "إيطاليا"),
+        ("GR", "اليونان"), ("MT", "مالطا"), ("PL", "بولندا"), ("CZ", "التشيك"),
+        ("SK", "سلوفاكيا"), ("HU", "المجر"), ("RO", "رومانيا"), ("BG", "بلغاريا"),
+        ("HR", "كرواتيا"), ("SI", "سلوفينيا"), ("RS", "صربيا"), ("BA", "البوسنة والهرسك"),
+        ("ME", "الجبل الأسود"), ("MK", "مقدونيا الشمالية"), ("AL", "ألبانيا"), ("UA", "أوكرانيا"),
+        ("BY", "بيلاروسيا"), ("RU", "روسيا"), ("MD", "مولدوفا"), ("LT", "ليتوانيا"),
+        ("LV", "لاتفيا"), ("EE", "إستونيا"), ("SE", "السويد"), ("NO", "النرويج"),
+        ("DK", "الدنمارك"), ("FI", "فنلندا"), ("IS", "آيسلندا"), ("AD", "أندورا"),
+        ("MC", "موناكو"), ("SM", "سان مارينو"), ("VA", "الفاتيكان"), ("LI", "ليختنشتاين"),
+    ]),
+    ("🌎 أمريكا الشمالية", [
+        ("US", "الولايات المتحدة"), ("CA", "كندا"), ("MX", "المكسيك"), ("GT", "غواتيمالا"),
+        ("BZ", "بليز"), ("HN", "هندوراس"), ("SV", "السلفادور"), ("NI", "نيكاراغوا"),
+        ("CR", "كوستاريكا"), ("PA", "بنما"), ("CU", "كوبا"), ("JM", "جامايكا"),
+        ("HT", "هايتي"), ("DO", "جمهورية الدومينيكان"), ("BS", "الباهاما"), ("BB", "باربادوس"),
+        ("TT", "ترينيداد وتوباغو"), ("GD", "غرينادا"), ("LC", "سانت لوسيا"), ("VC", "سانت فنسنت والغرينادين"),
+        ("AG", "أنتيغوا وباربودا"), ("DM", "دومينيكا"), ("KN", "سانت كيتس ونيفيس"),
+    ]),
+    ("🌎 أمريكا الجنوبية", [
+        ("BR", "البرازيل"), ("AR", "الأرجنتين"), ("CL", "تشيلي"), ("CO", "كولومبيا"),
+        ("PE", "بيرو"), ("VE", "فنزويلا"), ("EC", "الإكوادور"), ("BO", "بوليفيا"),
+        ("PY", "باراغواي"), ("UY", "الأوروغواي"), ("GY", "غيانا"), ("SR", "سورينام"),
+    ]),
+    ("🌏 أوقيانوسيا", [
+        ("AU", "أستراليا"), ("NZ", "نيوزيلندا"), ("PG", "بابوا غينيا الجديدة"), ("FJ", "فيجي"),
+        ("SB", "جزر سليمان"), ("VU", "فانواتو"), ("WS", "ساموا"), ("TO", "تونغا"),
+        ("KI", "كيريباتي"), ("FM", "ميكرونيسيا"), ("PW", "بالاو"), ("MH", "جزر مارشال"),
+        ("NR", "ناورو"), ("TV", "توفالو"),
+    ]),
+]
+
+COUNTRY_LOOKUP = {code: name for _, countries in COUNTRIES_BY_CONTINENT for code, name in countries}
+COUNTRIES_PER_PAGE = 8
+
 # ═══════════════════════════════════════════════════════════════
 # STATE MACHINE
 # ═══════════════════════════════════════════════════════════════
@@ -177,6 +252,8 @@ WAIT_GIFT_NAME = "WAIT_GIFT_NAME"
 WAIT_REF_NAME = "WAIT_REF_NAME"
 WAIT_GIFTCODE_BTN_NAME = "WAIT_GIFTCODE_BTN_NAME"
 WAIT_MYINFO_BTN_NAME = "WAIT_MYINFO_BTN_NAME"
+WAIT_COUNTRY_GATE_TEXT = "WAIT_COUNTRY_GATE_TEXT"
+WAIT_LANGUAGE_GATE_TEXT = "WAIT_LANGUAGE_GATE_TEXT"
 WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
@@ -232,7 +309,11 @@ DEFAULT_CONFIG = {
     "gift_claim_text_template": "🎁 تهانينا! حصلت على {points} نقاط من ({gift_name})!\nرصيدك الحالي: {balance} نقطة 🌟",
     "ref_info_text_template": "رابط الدعوة ( {ref_link} )\n\nعدد دعوتك ( {my_invites} )\n\nافضل توب 5 بعدد دعوات\n{top_text}",
     "gift_code_prompt_text_template": "🎟️ **استبدال كود الهدية أو المسابقة:**\n\nأرسل الآن الكود الذي حصلت عليه في المسابقة لاستلام نقاطك فوراً:\n/cancel للإلغاء",
-    "my_info_text_template": "👤 **معلوماتي:**\n\n👤 الاسم: {name}\n🆔 الآيدي: `{id}`\n🌟 نقاطك الحالية: {points}\n🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {invites} دعوة)"
+    "my_info_text_template": "👤 **معلوماتي:**\n\n👤 الاسم: {name}\n🆔 الآيدي: `{id}`\n🌟 نقاطك الحالية: {points}\n🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {invites} دعوة)",
+    "country_gate_active": True,
+    "country_gate_points": 1,
+    "country_gate_text": "🌍 **قبل ما نكمل...**\n\nحاب تختار دولتك أو مكان إقامتك؟ اختيارك اختياري تماماً، وإذا اخترت دولتك تحصل على نقطة إضافية 🎁\n\nاختر قارتك أولاً:",
+    "language_gate_text": "🗣️ **اختر لغتك المفضلة للتعامل مع البوت:**\n\n(هذا الاختيار اختياري ويمكنك تخطيه)"
 }
 
 FIXED_ITEMS = {
@@ -259,6 +340,18 @@ FIXED_ITEMS = {
         "name_cb": "edit_myinfo_btn_name",
         "text_key": "my_info_text_template",
         "placeholders": "{name} → اسم المستخدم\n{id} → آيدي المستخدم\n{points} → نقاطه الحالية\n{rank} → ترتيبه في الإحالات\n{invites} → عدد دعواته",
+    },
+    "country_gate": {
+        "label": "🌍 شاشة اختيار الدولة",
+        "name_cb": None,
+        "text_key": "country_gate_text",
+        "placeholders": "لا توجد متغيرات — هذا نص ثابت. يظهر هذا النص لأي مستخدم جديد قبل القائمة الرئيسية.",
+    },
+    "language_gate": {
+        "label": "🗣️ شاشة اختيار اللغة",
+        "name_cb": None,
+        "text_key": "language_gate_text",
+        "placeholders": "لا توجد متغيرات — هذا نص ثابت. يظهر هذا النص بعد شاشة اختيار الدولة.",
     },
 }
 
@@ -328,46 +421,59 @@ def save_users(data):
         users_collection.replace_one({"_id": str(uid_str)}, doc, upsert=True)
 
 
+def get_user(user_id):
+    """يجلب مستخدماً واحداً فقط من قاعدة البيانات (سريع، بدل تحميل كل المستخدمين)."""
+    doc = users_collection.find_one({"_id": str(user_id)})
+    if not doc:
+        return None
+    d = dict(doc)
+    d.pop("_id", None)
+    return d
+
+
+def save_user(user_id, user_dict):
+    """يحفظ مستخدماً واحداً فقط (سريع، بدل إعادة كتابة كل المستخدمين)."""
+    doc = dict(user_dict)
+    doc["_id"] = str(user_id)
+    users_collection.replace_one({"_id": str(user_id)}, doc, upsert=True)
+
+
 def register_user_points(user_id, name=""):
-    data = load_users()
     uid = str(user_id)
-    if uid not in data["users"]:
-        data["users"][uid] = {
+    user_rec = get_user(uid)
+    if not user_rec:
+        save_user(uid, {
             "name": name,
             "points": 0,
             "unlocked": [],
             "referred_by": None,
             "referral_rewarded": False,
             "referrals_count": 0,
-            "welcome_bonus_received": False
-        }
-        save_users(data)
+            "welcome_bonus_received": False,
+            "country": None,
+            "country_asked": False,
+            "country_bonus_given": False,
+            "language": None,
+            "language_asked": False,
+            "visits": 0
+        })
     else:
         changed = False
-        user_rec = data["users"][uid]
         if name and user_rec.get("name") != name:
             user_rec["name"] = name
             changed = True
-        if "points" not in user_rec:
-            user_rec["points"] = 0
-            changed = True
-        if "unlocked" not in user_rec:
-            user_rec["unlocked"] = []
-            changed = True
-        if "referred_by" not in user_rec:
-            user_rec["referred_by"] = None
-            changed = True
-        if "referral_rewarded" not in user_rec:
-            user_rec["referral_rewarded"] = False
-            changed = True
-        if "referrals_count" not in user_rec:
-            user_rec["referrals_count"] = 0
-            changed = True
-        if "welcome_bonus_received" not in user_rec:
-            user_rec["welcome_bonus_received"] = False
-            changed = True
+        for key, default in (
+            ("points", 0), ("unlocked", []), ("referred_by", None),
+            ("referral_rewarded", False), ("referrals_count", 0),
+            ("welcome_bonus_received", False), ("country", None),
+            ("country_asked", False), ("country_bonus_given", False),
+            ("language", None), ("language_asked", False), ("visits", 0)
+        ):
+            if key not in user_rec:
+                user_rec[key] = default
+                changed = True
         if changed:
-            save_users(data)
+            save_user(uid, user_rec)
 
 
 # ── Force-subscribe check ───────────────────────────────────────
@@ -414,9 +520,8 @@ def process_welcome_bonus(user_id):
     if not db.get("welcome_active", True):
         return 0
     
-    users_data = load_users()
     uid_str = str(user_id)
-    user_rec = users_data["users"].get(uid_str)
+    user_rec = get_user(uid_str)
     
     if not user_rec:
         return 0
@@ -425,7 +530,7 @@ def process_welcome_bonus(user_id):
         welcome_pts = db.get("welcome_points", 1)
         user_rec["points"] = user_rec.get("points", 0) + welcome_pts
         user_rec["welcome_bonus_received"] = True
-        save_users(users_data)
+        save_user(uid_str, user_rec)
         return welcome_pts
     return 0
 
@@ -437,9 +542,8 @@ def process_referral_reward(user_id):
     if not db.get("ref_active", True):
         return
     
-    users_data = load_users()
     uid_str = str(user_id)
-    user_rec = users_data["users"].get(uid_str)
+    user_rec = get_user(uid_str)
     
     if not user_rec:
         return
@@ -449,14 +553,15 @@ def process_referral_reward(user_id):
     
     if referrer_id and not rewarded:
         ref_id_str = str(referrer_id)
-        referrer_rec = users_data["users"].get(ref_id_str)
+        referrer_rec = get_user(ref_id_str)
         
         if referrer_rec:
             ref_points = db.get("ref_points", 2)
             referrer_rec["points"] = referrer_rec.get("points", 0) + ref_points
             referrer_rec["referrals_count"] = referrer_rec.get("referrals_count", 0) + 1
             user_rec["referral_rewarded"] = True
-            save_users(users_data)
+            save_user(ref_id_str, referrer_rec)
+            save_user(uid_str, user_rec)
             
             ref_name = db.get("ref_name", "نظام الإحالة")
             try:
@@ -476,14 +581,13 @@ GIFT_INTERVAL = 86400  # 24 hours in seconds
 
 
 def claim_daily_gift(user_id):
-    users_data = load_users()
+    uid = str(user_id)
+    user = get_user(uid)
     db = load_db()
     
-    uid = str(user_id)
-    if uid not in users_data["users"]:
+    if not user:
         return False, "⚠️ سجّل أولاً بإرسال /start"
     
-    user = users_data["users"][uid]
     now = time.time()
     last = user.get("last_gift", 0)
     elapsed = now - last
@@ -501,7 +605,7 @@ def claim_daily_gift(user_id):
     
     user["points"] = user.get("points", 0) + current_gift_points
     user["last_gift"] = now
-    save_users(users_data)
+    save_user(uid, user)
     
     gift_name = db.get("gift_name", "الهدية اليومية")
     template = db.get("gift_claim_text_template", DEFAULT_CONFIG["gift_claim_text_template"])
@@ -694,6 +798,106 @@ def build_nav_markup(db, parent_id=None):
     return markup
 
 
+def render_main_menu(cid, mid, is_current_text, user_obj, prefix_text=""):
+    """يعرض القائمة الرئيسية (بالتعديل مكان الرسالة الحالية إن وُجدت mid، وإلا برسالة جديدة)."""
+    db = load_db()
+    welcome_msg = (prefix_text + "\n" if prefix_text else "") + main_menu_welcome_text(user_obj)
+    if get_children(db, None):
+        markup = build_nav_markup(db, None)
+        text = welcome_msg
+    else:
+        markup = None
+        text = welcome_msg + "\nالقائمة فارغة حالياً."
+
+    if mid:
+        edit_or_replace(cid, mid, is_current_text, text, markup=markup)
+    else:
+        bot.send_message(cid, text, reply_markup=markup)
+
+
+def render_country_gate(cid, mid, is_current_text, prefix_text=""):
+    """يعرض شاشة اختيار القارة (الخطوة الأولى من اختيار الدولة)."""
+    db = load_db()
+    text = (prefix_text + "\n\n" if prefix_text else "") + db.get("country_gate_text", DEFAULT_CONFIG["country_gate_text"])
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    labels = [label for label, _ in COUNTRIES_BY_CONTINENT]
+    for i in range(0, len(labels), 2):
+        row = labels[i:i + 2]
+        markup.row(*[
+            types.InlineKeyboardButton(row[j], callback_data=f"ccont_{labels.index(row[j])}")
+            for j in range(len(row))
+        ])
+    markup.add(types.InlineKeyboardButton("⏭️ تخطي (بدون تحديد دولة)", callback_data="country_skip"))
+    if mid:
+        edit_or_replace(cid, mid, is_current_text, text, markup=markup, parse_mode="Markdown")
+    else:
+        bot.send_message(cid, text, reply_markup=markup, parse_mode="Markdown")
+
+
+def render_country_list(cid, mid, is_current_text, continent_index, page=0):
+    """يعرض قائمة دول قارة معينة (مقسّمة على صفحات)."""
+    label, countries = COUNTRIES_BY_CONTINENT[continent_index]
+    start = page * COUNTRIES_PER_PAGE
+    page_items = countries[start:start + COUNTRIES_PER_PAGE]
+    total_pages = (len(countries) - 1) // COUNTRIES_PER_PAGE + 1
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    for i in range(0, len(page_items), 2):
+        row = page_items[i:i + 2]
+        markup.row(*[
+            types.InlineKeyboardButton(f"{flag(code)} {name}", callback_data=f"cpick_{code}")
+            for code, name in row
+        ])
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(types.InlineKeyboardButton("◀️ السابق", callback_data=f"cpage_{continent_index}_{page - 1}"))
+    if start + COUNTRIES_PER_PAGE < len(countries):
+        nav_row.append(types.InlineKeyboardButton("التالي ▶️", callback_data=f"cpage_{continent_index}_{page + 1}"))
+    if nav_row:
+        markup.row(*nav_row)
+
+    markup.add(types.InlineKeyboardButton("🔙 رجوع لاختيار القارة", callback_data="cback"))
+    markup.add(types.InlineKeyboardButton("⏭️ تخطي (بدون تحديد دولة)", callback_data="country_skip"))
+
+    text = f"{label}\n\nصفحة {page + 1} من {total_pages} — اختر دولتك:"
+    edit_or_replace(cid, mid, is_current_text, text, markup=markup)
+
+
+def render_language_gate(cid, mid, is_current_text, prefix_text=""):
+    """يعرض شاشة اختيار اللغة (الخطوة الأخيرة قبل القائمة الرئيسية)."""
+    db = load_db()
+    text = (prefix_text + "\n\n" if prefix_text else "") + db.get("language_gate_text", DEFAULT_CONFIG["language_gate_text"])
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar"),
+        types.InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+    )
+    markup.add(types.InlineKeyboardButton("⏭️ تخطي", callback_data="lang_skip"))
+    if mid:
+        edit_or_replace(cid, mid, is_current_text, text, markup=markup, parse_mode="Markdown")
+    else:
+        bot.send_message(cid, text, reply_markup=markup, parse_mode="Markdown")
+
+
+def enter_bot_gate(cid, mid, is_current_text, user_obj, prefix_text=""):
+    """
+    يقرر الشاشة التالية بعد التسجيل/التحقق من الاشتراك:
+    شاشة اختيار الدولة (إن لم تُعرض من قبل)، ثم شاشة اللغة، ثم القائمة الرئيسية.
+    mid=None يعني إرسال رسالة جديدة، وإلا يُعدَّل مكان الرسالة الحالية.
+    """
+    db = load_db()
+    uid_str = str(user_obj.id)
+    user_rec = get_user(uid_str) or {}
+
+    if db.get("country_gate_active", True) and not user_rec.get("country_asked"):
+        render_country_gate(cid, mid, is_current_text, prefix_text)
+    elif not user_rec.get("language_asked"):
+        render_language_gate(cid, mid, is_current_text, prefix_text)
+    else:
+        render_main_menu(cid, mid, is_current_text, user_obj, prefix_text)
+
+
 def back_only_markup(btn):
     parent_id = btn.get("parent_id")
     markup = types.InlineKeyboardMarkup()
@@ -798,7 +1002,8 @@ def start(message):
     name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or ""
 
     args = message.text.split()
-    is_new = uid_str not in load_users()["users"] or not load_users()["users"][uid_str].get("name")
+    existing_user_rec = get_user(uid_str)
+    is_new = existing_user_rec is None or not existing_user_rec.get("name")
     
     register_user_points(u.id, name)
 
@@ -806,9 +1011,9 @@ def start(message):
         try:
             ref_id = int(args[1].replace("ref_", ""))
             if ref_id != u.id:
-                users_data = load_users()
-                users_data["users"][uid_str]["referred_by"] = ref_id
-                save_users(users_data)
+                user_rec = get_user(uid_str) or {}
+                user_rec["referred_by"] = ref_id
+                save_user(uid_str, user_rec)
         except Exception as e:
             logger.exception("Error parsing referral in start: %s", e)
 
@@ -827,22 +1032,15 @@ def start(message):
     bonus_given = process_welcome_bonus(u.id)
     process_referral_reward(u.id)
 
-    db = load_db()
-    welcome_msg = main_menu_welcome_text(u)
-    if bonus_given > 0:
-        welcome_msg = f"🎉 أهلاً بك {get_display_name(u)}! لقد حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة).\n\n" + main_menu_welcome_text(u)
+    user_rec = get_user(uid_str) or {}
+    user_rec["visits"] = user_rec.get("visits", 0) + 1
+    save_user(uid_str, user_rec)
 
-    if get_children(db, None):
-        bot.send_message(
-            message.chat.id,
-            welcome_msg,
-            reply_markup=build_nav_markup(db, None),
-        )
-    else:
-        bot.send_message(
-            message.chat.id,
-            welcome_msg + "\nالقائمة فارغة حالياً.",
-        )
+    prefix_text = ""
+    if bonus_given > 0:
+        prefix_text = f"🎉 أهلاً بك {get_display_name(u)}! لقد حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)."
+
+    enter_bot_gate(message.chat.id, None, False, u, prefix_text)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1205,7 +1403,8 @@ def callback(call):
                 bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
                 return
             markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(types.InlineKeyboardButton("📝 تعديل اسم الزر (كما يظهر في القائمة)", callback_data=item["name_cb"]))
+            if item.get("name_cb"):
+                markup.add(types.InlineKeyboardButton("📝 تعديل اسم الزر (كما يظهر في القائمة)", callback_data=item["name_cb"]))
             markup.add(types.InlineKeyboardButton("📄 تعديل النص الذي يظهر عند الضغط عليه", callback_data=f"adm_fixed_text_{key}"))
             markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="adm_fixed_texts"))
             bot.edit_message_text(
@@ -1824,20 +2023,82 @@ def callback(call):
                 
                 bonus_given = process_welcome_bonus(uid)
                 process_referral_reward(uid)
+
+                user_rec = get_user(str(uid)) or {}
+                user_rec["visits"] = user_rec.get("visits", 0) + 1
+                save_user(str(uid), user_rec)
                 
-                nav_text = "✅ تم التحقق من اشتراكك في القنوات بنجاح!\n"
+                prefix_text = "✅ تم التحقق من اشتراكك في القنوات بنجاح!"
                 if bonus_given > 0:
-                    nav_text += f"🎁 حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)!\n"
-                nav_text += main_menu_welcome_text(call.from_user)
-                
-                if get_children(db, None):
-                    bot.send_message(
-                        cid,
-                        nav_text,
-                        reply_markup=build_nav_markup(db, None),
-                    )
-                else:
-                    bot.send_message(cid, nav_text + "\nالقائمة فارغة حالياً.")
+                    prefix_text += f"\n🎁 حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)!"
+
+                enter_bot_gate(cid, None, False, call.from_user, prefix_text)
+            return
+
+        if data.startswith("ccont_"):
+            continent_index = int(data[len("ccont_"):])
+            render_country_list(cid, mid, call.message.content_type == "text", continent_index, page=0)
+            return
+
+        if data.startswith("cpage_"):
+            _, continent_index_str, page_str = data.split("_")
+            render_country_list(cid, mid, call.message.content_type == "text", int(continent_index_str), page=int(page_str))
+            return
+
+        if data == "cback":
+            render_country_gate(cid, mid, call.message.content_type == "text")
+            return
+
+        if data.startswith("cpick_"):
+            code = data[len("cpick_"):]
+            country_name = COUNTRY_LOOKUP.get(code)
+            db = load_db()
+            uid_str = str(uid)
+            user_rec = get_user(uid_str) or {}
+            user_rec["country"] = code
+            user_rec["country_asked"] = True
+
+            bonus_note = ""
+            if not user_rec.get("country_bonus_given"):
+                bonus_pts = int(db.get("country_gate_points", 1))
+                user_rec["points"] = user_rec.get("points", 0) + bonus_pts
+                user_rec["country_bonus_given"] = True
+                bonus_note = f"✅ اخترت: {flag(code)} {country_name} — حصلت على {bonus_pts} نقطة إضافية! 🎁"
+            else:
+                bonus_note = f"✅ اخترت: {flag(code)} {country_name}"
+            save_user(uid_str, user_rec)
+
+            if not user_rec.get("language_asked"):
+                render_language_gate(cid, mid, call.message.content_type == "text", bonus_note)
+            else:
+                render_main_menu(cid, mid, call.message.content_type == "text", call.from_user, bonus_note)
+            return
+
+        if data == "country_skip":
+            uid_str = str(uid)
+            user_rec = get_user(uid_str) or {}
+            user_rec["country_asked"] = True
+            save_user(uid_str, user_rec)
+
+            if not user_rec.get("language_asked"):
+                render_language_gate(cid, mid, call.message.content_type == "text")
+            else:
+                render_main_menu(cid, mid, call.message.content_type == "text", call.from_user)
+            return
+
+        if data in ("lang_ar", "lang_en", "lang_skip"):
+            uid_str = str(uid)
+            user_rec = get_user(uid_str) or {}
+            user_rec["language_asked"] = True
+            note = ""
+            if data == "lang_ar":
+                user_rec["language"] = "ar"
+                note = "✅ تم اختيار: 🇸🇦 العربية"
+            elif data == "lang_en":
+                user_rec["language"] = "en"
+                note = "✅ تم اختيار: 🇬🇧 English"
+            save_user(uid_str, user_rec)
+            render_main_menu(cid, mid, call.message.content_type == "text", call.from_user, note)
             return
 
         if uid != ADMIN_ID:
@@ -2035,6 +2296,9 @@ def callback(call):
                 types.InlineKeyboardButton("🎁 إحصائيات توزيع النقاط", callback_data="usr_points_distribution")
             )
             markup.add(
+                types.InlineKeyboardButton("🌍 أكثر المستخدمين زيارةً للبوت", callback_data="usr_country_stats")
+            )
+            markup.add(
                 types.InlineKeyboardButton("⚖️ تعديل رصيد النقاط", callback_data="usr_lookup_prompt"),
                 types.InlineKeyboardButton("🔙 العودة لوحة التحكم", callback_data="adm_back_main")
             )
@@ -2066,6 +2330,66 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_users"))
             bot.edit_message_text(
                 "🔍 أرسل الآن **ID المستخدم** الذي تريد إدارة حسابه (معرفة نقاطه، تعديل رصيده، أو حظره):\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "usr_country_stats":
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(types.InlineKeyboardButton("📋 الدول الأكثر زيارة (تسجيلاً) للبوت", callback_data="usr_country_visits"))
+            markup.add(types.InlineKeyboardButton("🔥 الدول الأكثر استخداماً للبوت", callback_data="usr_country_usage"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            bot.edit_message_text(
+                "🌍 **إحصائيات الدول:**\n\n"
+                "• «الأكثر زيارة» = عدد المستخدمين المسجَّلين من كل دولة.\n"
+                "• «الأكثر استخداماً» = مجموع مرات استخدام البوت (/start) للمستخدمين من كل دولة.\n\n"
+                "اختر التقرير:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data in ("usr_country_visits", "usr_country_usage"):
+            users_data = load_users()
+            all_users = users_data.get("users", {})
+            total_users = len(all_users) or 1
+
+            counts = {}
+            usage = {}
+            unspecified_count = 0
+            unspecified_usage = 0
+            for u_rec in all_users.values():
+                code = u_rec.get("country")
+                visits = int(u_rec.get("visits", 0))
+                if code and code in COUNTRY_LOOKUP:
+                    counts[code] = counts.get(code, 0) + 1
+                    usage[code] = usage.get(code, 0) + visits
+                else:
+                    unspecified_count += 1
+                    unspecified_usage += visits
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="usr_country_stats"))
+
+            if data == "usr_country_visits":
+                title = "📋 **الدول الأكثر زيارة (تسجيلاً) للبوت:**"
+                rows = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+                lines = [
+                    f"{flag(code)} {COUNTRY_LOOKUP[code]} — {cnt} مستخدم ({cnt / total_users * 100:.1f}%)"
+                    for code, cnt in rows
+                ]
+                lines.append(f"🏳️ غير محدَّد — {unspecified_count} مستخدم ({unspecified_count / total_users * 100:.1f}%)")
+            else:
+                title = "🔥 **الدول الأكثر استخداماً للبوت:**"
+                rows = sorted(usage.items(), key=lambda x: x[1], reverse=True)
+                lines = [f"{flag(code)} {COUNTRY_LOOKUP[code]} — {cnt} استخدام" for code, cnt in rows]
+                lines.append(f"🏳️ غير محدَّد — {unspecified_usage} استخدام")
+
+            shown_lines = lines[:30]
+            extra_note = f"\n\n…و{len(lines) - 30} دولة أخرى." if len(lines) > 30 else ""
+            body = "\n".join(shown_lines) if shown_lines else "لا توجد بيانات كافية بعد."
+
+            bot.edit_message_text(
+                f"{title}\n\n{body}{extra_note}",
                 cid, mid, reply_markup=markup, parse_mode="Markdown"
             )
             return
