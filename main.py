@@ -254,6 +254,7 @@ WAIT_GIFTCODE_BTN_NAME = "WAIT_GIFTCODE_BTN_NAME"
 WAIT_MYINFO_BTN_NAME = "WAIT_MYINFO_BTN_NAME"
 WAIT_COUNTRY_GATE_TEXT = "WAIT_COUNTRY_GATE_TEXT"
 WAIT_LANGUAGE_GATE_TEXT = "WAIT_LANGUAGE_GATE_TEXT"
+WAIT_LANGUAGE_BTN_NAME = "WAIT_LANGUAGE_BTN_NAME"
 WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
@@ -313,7 +314,8 @@ DEFAULT_CONFIG = {
     "country_gate_active": True,
     "country_gate_points": 1,
     "country_gate_text": "🌍 **قبل ما نكمل...**\n\nحاب تختار دولتك أو مكان إقامتك؟ اختيارك اختياري تماماً، وإذا اخترت دولتك تحصل على نقطة إضافية 🎁\n\nاختر قارتك أولاً:",
-    "language_gate_text": "🗣️ **اختر لغتك المفضلة للتعامل مع البوت:**\n\n(هذا الاختيار اختياري ويمكنك تخطيه)"
+    "language_gate_text": "🗣️ **اختر لغتك المفضلة للتعامل مع البوت:**\n\n(هذا الاختيار اختياري ويمكنك تخطيه)",
+    "language_btn_name": "🗣️ لغة البوت"
 }
 
 FIXED_ITEMS = {
@@ -349,9 +351,9 @@ FIXED_ITEMS = {
     },
     "language_gate": {
         "label": "🗣️ شاشة اختيار اللغة",
-        "name_cb": None,
+        "name_cb": "edit_language_btn_name",
         "text_key": "language_gate_text",
-        "placeholders": "لا توجد متغيرات — هذا نص ثابت. يظهر هذا النص بعد شاشة اختيار الدولة.",
+        "placeholders": "لا توجد متغيرات — هذا نص ثابت. يظهر هذا النص بعد شاشة اختيار الدولة، وأيضاً عند الضغط على زر «لغة البوت» من القائمة الرئيسية.",
     },
 }
 
@@ -474,6 +476,79 @@ def register_user_points(user_id, name=""):
                 changed = True
         if changed:
             save_user(uid, user_rec)
+
+
+def process_start(user_obj, args):
+    """
+    يسجّل المستخدم ويطبّق مكافأة التسجيل والإحالة ويزيد عداد الزيارات،
+    بأقل عدد ممكن من الاتصالات بقاعدة البيانات (بدل استدعاء عدة دوال منفصلة
+    كل واحدة تُحمّل/تحفظ من جديد، وهو ما كان يسبب بطء استجابة /start).
+    يرجع (db, user_rec, bonus_given).
+    """
+    uid_str = str(user_obj.id)
+    name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip() or user_obj.username or ""
+
+    db = load_db()
+    user_rec = get_user(uid_str)
+    is_new = user_rec is None or not user_rec.get("name")
+
+    if not user_rec:
+        user_rec = {
+            "name": name, "points": 0, "unlocked": [], "referred_by": None,
+            "referral_rewarded": False, "referrals_count": 0,
+            "welcome_bonus_received": False, "country": None, "country_asked": False,
+            "country_bonus_given": False, "language": None, "language_asked": False,
+            "visits": 0
+        }
+    else:
+        for key, default in (
+            ("points", 0), ("unlocked", []), ("referred_by", None),
+            ("referral_rewarded", False), ("referrals_count", 0),
+            ("welcome_bonus_received", False), ("country", None),
+            ("country_asked", False), ("country_bonus_given", False),
+            ("language", None), ("language_asked", False), ("visits", 0)
+        ):
+            user_rec.setdefault(key, default)
+        if name:
+            user_rec["name"] = name
+
+    if len(args) > 1 and args[1].startswith("ref_") and is_new:
+        try:
+            ref_id = int(args[1].replace("ref_", ""))
+            if ref_id != user_obj.id:
+                user_rec["referred_by"] = ref_id
+        except Exception as e:
+            logger.exception("Error parsing referral in start: %s", e)
+
+    bonus_given = 0
+    if db.get("welcome_active", True) and not user_rec.get("welcome_bonus_received", False):
+        bonus_given = db.get("welcome_points", 1)
+        user_rec["points"] = user_rec.get("points", 0) + bonus_given
+        user_rec["welcome_bonus_received"] = True
+
+    referrer_id = user_rec.get("referred_by")
+    referrer_rec = None
+    referrer_id_str = None
+    if db.get("ref_active", True) and referrer_id and not user_rec.get("referral_rewarded", False):
+        referrer_id_str = str(referrer_id)
+        referrer_rec = get_user(referrer_id_str)
+        if referrer_rec:
+            ref_points = db.get("ref_points", 2)
+            referrer_rec["points"] = referrer_rec.get("points", 0) + ref_points
+            referrer_rec["referrals_count"] = referrer_rec.get("referrals_count", 0) + 1
+            user_rec["referral_rewarded"] = True
+
+    user_rec["visits"] = user_rec.get("visits", 0) + 1
+
+    save_user(uid_str, user_rec)
+    if referrer_rec:
+        save_user(referrer_id_str, referrer_rec)
+
+    if user_obj.id not in db.get("users", []):
+        db.setdefault("users", []).append(user_obj.id)
+        save_db(db)
+
+    return db, user_rec, bonus_given
 
 
 # ── Force-subscribe check ───────────────────────────────────────
@@ -761,21 +836,52 @@ def show_leaf_content(cid, mid, is_current_text, btn, back_markup):
 # NAVIGATION MARKUP
 # ═══════════════════════════════════════════════════════════════
 
-def build_nav_markup(db, parent_id=None):
+def build_nav_markup(db, parent_id=None, user_rec=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
-    
-    for i in range(0, len(children), 2):
-        row_buttons = []
-        for btn in children[i:i+2]:
+
+    if parent_id is None:
+        # قائمة موحّدة بعمودين تجمع كل أزرار المستوى الرئيسي معاً (الأقسام/الخدمات + الأزرار الثابتة)
+        gift_name = db.get("gift_name", "الهدية اليومية")
+        ref_name = db.get("ref_name", "رابط الإحالة")
+        gift_code_btn_name = db.get("gift_code_btn_name", "🎟️ كود هدية 🎁")
+        my_info_btn_name = db.get("my_info_btn_name", "👤 معلوماتي")
+        language_btn_name = db.get("language_btn_name", "🗣️ لغة البوت")
+
+        items = []
+        for btn in children:
             is_locked = int(btn.get("unlock_points", 0)) > 0
             lock_icon = " 🔒" if is_locked else ""
-            row_buttons.append(
-                types.InlineKeyboardButton(f"{btn['name']}{lock_icon}", callback_data=f"nav_{btn['id']}")
-            )
-        markup.row(*row_buttons)
+            items.append((f"{btn['name']}{lock_icon}", f"nav_{btn['id']}"))
 
-    if parent_id is not None:
+        items.append((f"🎁 {gift_name}", "gift_claim"))
+        items.append((f"🔗 {ref_name}", "ref_link_info"))
+        items.append((gift_code_btn_name, "gift_code_prompt"))
+        items.append((my_info_btn_name, "my_info"))
+        items.append((language_btn_name, "language_menu"))
+
+        for i in range(0, len(items), 2):
+            row = items[i:i + 2]
+            markup.row(*[types.InlineKeyboardButton(text, callback_data=cb) for text, cb in row])
+
+        if user_rec is not None:
+            needs_country = db.get("country_gate_active", True) and user_rec.get("country") is None
+            needs_language = user_rec.get("language") is None
+            if needs_country or needs_language:
+                markup.add(
+                    types.InlineKeyboardButton("🔁 لم تختر دولتك/لغتك بعد؟ اضغط هنا", callback_data="redo_gate")
+                )
+    else:
+        for i in range(0, len(children), 2):
+            row_buttons = []
+            for btn in children[i:i + 2]:
+                is_locked = int(btn.get("unlock_points", 0)) > 0
+                lock_icon = " 🔒" if is_locked else ""
+                row_buttons.append(
+                    types.InlineKeyboardButton(f"{btn['name']}{lock_icon}", callback_data=f"nav_{btn['id']}")
+                )
+            markup.row(*row_buttons)
+
         parent = get_button(db, parent_id)
         back_to = parent.get("parent_id") if parent else None
         markup.add(
@@ -783,43 +889,28 @@ def build_nav_markup(db, parent_id=None):
                 "🔙 رجوع", callback_data=f"nav_back_{back_to if back_to else 'root'}"
             )
         )
-    else:
-        db_data = load_db()
-        gift_name = db_data.get("gift_name", "الهدية اليومية")
-        ref_name = db_data.get("ref_name", "رابط الإحالة")
-        gift_code_btn_name = db_data.get("gift_code_btn_name", "🎟️ كود هدية 🎁")
-        my_info_btn_name = db_data.get("my_info_btn_name", "👤 معلوماتي")
-        markup.add(
-            types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
-            types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info")
-        )
-        markup.row(
-            types.InlineKeyboardButton(gift_code_btn_name, callback_data="gift_code_prompt"),
-            types.InlineKeyboardButton(my_info_btn_name, callback_data="my_info")
-        )
     return markup
 
 
-def render_main_menu(cid, mid, is_current_text, user_obj, prefix_text=""):
+def render_main_menu(cid, mid, is_current_text, user_obj, prefix_text="", user_rec=None, db=None):
     """يعرض القائمة الرئيسية (بالتعديل مكان الرسالة الحالية إن وُجدت mid، وإلا برسالة جديدة)."""
-    db = load_db()
+    if db is None:
+        db = load_db()
+    if user_rec is None:
+        user_rec = get_user(str(user_obj.id))
     welcome_msg = (prefix_text + "\n" if prefix_text else "") + main_menu_welcome_text(user_obj)
-    if get_children(db, None):
-        markup = build_nav_markup(db, None)
-        text = welcome_msg
-    else:
-        markup = None
-        text = welcome_msg + "\nالقائمة فارغة حالياً."
+    markup = build_nav_markup(db, None, user_rec=user_rec)
 
     if mid:
-        edit_or_replace(cid, mid, is_current_text, text, markup=markup)
+        edit_or_replace(cid, mid, is_current_text, welcome_msg, markup=markup)
     else:
-        bot.send_message(cid, text, reply_markup=markup)
+        bot.send_message(cid, welcome_msg, reply_markup=markup)
 
 
-def render_country_gate(cid, mid, is_current_text, prefix_text=""):
+def render_country_gate(cid, mid, is_current_text, prefix_text="", db=None):
     """يعرض شاشة اختيار القارة (الخطوة الأولى من اختيار الدولة)."""
-    db = load_db()
+    if db is None:
+        db = load_db()
     text = (prefix_text + "\n\n" if prefix_text else "") + db.get("country_gate_text", DEFAULT_CONFIG["country_gate_text"])
     markup = types.InlineKeyboardMarkup(row_width=2)
     labels = [label for label, _ in COUNTRIES_BY_CONTINENT]
@@ -866,9 +957,10 @@ def render_country_list(cid, mid, is_current_text, continent_index, page=0):
     edit_or_replace(cid, mid, is_current_text, text, markup=markup)
 
 
-def render_language_gate(cid, mid, is_current_text, prefix_text=""):
+def render_language_gate(cid, mid, is_current_text, prefix_text="", db=None):
     """يعرض شاشة اختيار اللغة (الخطوة الأخيرة قبل القائمة الرئيسية)."""
-    db = load_db()
+    if db is None:
+        db = load_db()
     text = (prefix_text + "\n\n" if prefix_text else "") + db.get("language_gate_text", DEFAULT_CONFIG["language_gate_text"])
     markup = types.InlineKeyboardMarkup()
     markup.add(
@@ -882,22 +974,25 @@ def render_language_gate(cid, mid, is_current_text, prefix_text=""):
         bot.send_message(cid, text, reply_markup=markup, parse_mode="Markdown")
 
 
-def enter_bot_gate(cid, mid, is_current_text, user_obj, prefix_text=""):
+def enter_bot_gate(cid, mid, is_current_text, user_obj, prefix_text="", db=None, user_rec=None):
     """
     يقرر الشاشة التالية بعد التسجيل/التحقق من الاشتراك:
     شاشة اختيار الدولة (إن لم تُعرض من قبل)، ثم شاشة اللغة، ثم القائمة الرئيسية.
     mid=None يعني إرسال رسالة جديدة، وإلا يُعدَّل مكان الرسالة الحالية.
+    يقبل db/user_rec جاهزَين (إن توفّرا) لتفادي إعادة استعلام قاعدة البيانات.
     """
-    db = load_db()
+    if db is None:
+        db = load_db()
     uid_str = str(user_obj.id)
-    user_rec = get_user(uid_str) or {}
+    if user_rec is None:
+        user_rec = get_user(uid_str) or {}
 
     if db.get("country_gate_active", True) and not user_rec.get("country_asked"):
-        render_country_gate(cid, mid, is_current_text, prefix_text)
+        render_country_gate(cid, mid, is_current_text, prefix_text, db=db)
     elif not user_rec.get("language_asked"):
-        render_language_gate(cid, mid, is_current_text, prefix_text)
+        render_language_gate(cid, mid, is_current_text, prefix_text, db=db)
     else:
-        render_main_menu(cid, mid, is_current_text, user_obj, prefix_text)
+        render_main_menu(cid, mid, is_current_text, user_obj, prefix_text, user_rec=user_rec, db=db)
 
 
 def back_only_markup(btn):
@@ -998,26 +1093,8 @@ def render_button_management_screen(cid, mid, btn_id):
 def start(message):
     logger.info("Bot received start command from %s", message.from_user.id)
     clear_state(message.from_user.id)
-    register_user(message.from_user.id)
     u = message.from_user
-    uid_str = str(u.id)
-    name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or ""
-
     args = message.text.split()
-    existing_user_rec = get_user(uid_str)
-    is_new = existing_user_rec is None or not existing_user_rec.get("name")
-    
-    register_user_points(u.id, name)
-
-    if len(args) > 1 and args[1].startswith("ref_") and is_new:
-        try:
-            ref_id = int(args[1].replace("ref_", ""))
-            if ref_id != u.id:
-                user_rec = get_user(uid_str) or {}
-                user_rec["referred_by"] = ref_id
-                save_user(uid_str, user_rec)
-        except Exception as e:
-            logger.exception("Error parsing referral in start: %s", e)
 
     if u.id != ADMIN_ID:
         missing = check_subscription(u.id)
@@ -1031,18 +1108,13 @@ def start(message):
             )
             return
 
-    bonus_given = process_welcome_bonus(u.id)
-    process_referral_reward(u.id)
-
-    user_rec = get_user(uid_str) or {}
-    user_rec["visits"] = user_rec.get("visits", 0) + 1
-    save_user(uid_str, user_rec)
+    db, user_rec, bonus_given = process_start(u, args)
 
     prefix_text = ""
     if bonus_given > 0:
         prefix_text = f"🎉 أهلاً بك {get_display_name(u)}! لقد حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)."
 
-    enter_bot_gate(message.chat.id, None, False, u, prefix_text)
+    enter_bot_gate(message.chat.id, None, False, u, prefix_text, db=db, user_rec=user_rec)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1458,6 +1530,17 @@ def callback(call):
             except Exception:
                 pass
             bot.send_message(cid, "✍️ أرسل الآن النص الجديد لزر «معلوماتي» في القائمة الرئيسية:", reply_markup=markup)
+            return
+
+        if data == "edit_language_btn_name":
+            set_state(uid, WAIT_LANGUAGE_BTN_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_fixed_texts"))
+            try:
+                bot.delete_message(cid, mid)
+            except Exception:
+                pass
+            bot.send_message(cid, "✍️ أرسل الآن النص الجديد لزر «لغة البوت» في القائمة الرئيسية:", reply_markup=markup)
             return
 
         if data.startswith("adm_set_back_"):
@@ -1927,7 +2010,8 @@ def callback(call):
                     if parent_id is None
                     else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
                 )
-                nav_markup = build_nav_markup(db, parent_id)
+                user_rec_for_markup = get_user(str(uid)) if parent_id is None else None
+                nav_markup = build_nav_markup(db, parent_id, user_rec=user_rec_for_markup)
                 if call.message.content_type != "text":
                     try:
                         bot.delete_message(cid, mid)
@@ -2022,19 +2106,14 @@ def callback(call):
                     bot.delete_message(cid, mid)
                 except Exception:
                     pass
-                
-                bonus_given = process_welcome_bonus(uid)
-                process_referral_reward(uid)
 
-                user_rec = get_user(str(uid)) or {}
-                user_rec["visits"] = user_rec.get("visits", 0) + 1
-                save_user(str(uid), user_rec)
-                
+                db, user_rec, bonus_given = process_start(call.from_user, [])
+
                 prefix_text = "✅ تم التحقق من اشتراكك في القنوات بنجاح!"
                 if bonus_given > 0:
                     prefix_text += f"\n🎁 حصلت على هدية التسجيل لأول مرة ({bonus_given} نقطة)!"
 
-                enter_bot_gate(cid, None, False, call.from_user, prefix_text)
+                enter_bot_gate(cid, None, False, call.from_user, prefix_text, db=db, user_rec=user_rec)
             return
 
         if data.startswith("ccont_"):
@@ -2086,6 +2165,23 @@ def callback(call):
                 render_language_gate(cid, mid, call.message.content_type == "text")
             else:
                 render_main_menu(cid, mid, call.message.content_type == "text", call.from_user)
+            return
+
+        if data == "language_menu":
+            render_language_gate(cid, mid, call.message.content_type == "text")
+            return
+
+        if data == "redo_gate":
+            uid_str = str(uid)
+            user_rec = get_user(uid_str) or {}
+            db = load_db()
+            is_text = call.message.content_type == "text"
+            if db.get("country_gate_active", True) and user_rec.get("country") is None:
+                render_country_gate(cid, mid, is_text)
+            elif user_rec.get("language") is None:
+                render_language_gate(cid, mid, is_text)
+            else:
+                render_main_menu(cid, mid, is_text, call.from_user)
             return
 
         if data in ("lang_ar", "lang_en", "lang_skip"):
@@ -2871,6 +2967,26 @@ def handle_state(message):
         bot.send_message(
             cid,
             f"✅ **تم تغيير نص زر «معلوماتي» بنجاح!**\n\n• النص الجديد: {new_name}",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    elif state == WAIT_LANGUAGE_BTN_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل النص كرسالة نصية من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        db["language_btn_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة", callback_data="adm_fixed_texts"))
+        bot.send_message(
+            cid,
+            f"✅ **تم تغيير نص زر «لغة البوت» بنجاح!**\n\n• النص الجديد: {new_name}",
             reply_markup=markup,
             parse_mode="Markdown"
         )
