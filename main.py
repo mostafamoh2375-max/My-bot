@@ -172,7 +172,7 @@ COUNTRIES_BY_CONTINENT = [
         ("SA", "السعودية"), ("AE", "الإمارات"), ("QA", "قطر"), ("KW", "الكويت"),
         ("BH", "البحرين"), ("OM", "عُمان"), ("YE", "اليمن"), ("IQ", "العراق"),
         ("SY", "سوريا"), ("LB", "لبنان"), ("JO", "الأردن"), ("PS", "فلسطين"),
-        ("TR", "تركيا"), ("IR", "إيران"), ("IL", "إسرائيل"), ("CY", "قبرص"),
+        ("TR", "تركيا"), ("IR", "إيران"), ("CY", "قبرص"),
         ("CN", "الصين"), ("JP", "اليابان"), ("KR", "كوريا الجنوبية"), ("KP", "كوريا الشمالية"),
         ("IN", "الهند"), ("PK", "باكستان"), ("BD", "بنغلاديش"), ("LK", "سريلانكا"),
         ("NP", "نيبال"), ("BT", "بوتان"), ("MV", "جزر المالديف"), ("MM", "ميانمار"),
@@ -793,8 +793,10 @@ def build_nav_markup(db, parent_id=None):
             types.InlineKeyboardButton(f"🎁 {gift_name}", callback_data="gift_claim"),
             types.InlineKeyboardButton(f"🔗 {ref_name}", callback_data="ref_link_info")
         )
-        markup.add(types.InlineKeyboardButton(gift_code_btn_name, callback_data="gift_code_prompt"))
-        markup.add(types.InlineKeyboardButton(my_info_btn_name, callback_data="my_info"))
+        markup.row(
+            types.InlineKeyboardButton(gift_code_btn_name, callback_data="gift_code_prompt"),
+            types.InlineKeyboardButton(my_info_btn_name, callback_data="my_info")
+        )
     return markup
 
 
