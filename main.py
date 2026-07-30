@@ -205,10 +205,14 @@ TRANSLATIONS = {
     "ar": {
         "welcome": "👋 أهلاً بك {name}! اختر من القائمة:",
         "back": "🔙 رجوع",
+        "no_content_yet": "(لا يوجد محتوى بعد.)",
+        "locked_default_desc": "هذا المحتوى حصري ومقفول.",
     },
     "en": {
         "welcome": "👋 Welcome {name}! Choose from the menu:",
         "back": "🔙 Back",
+        "no_content_yet": "(No content yet.)",
+        "locked_default_desc": "This content is exclusive and locked.",
     },
 }
 
@@ -216,6 +220,50 @@ TRANSLATIONS = {
 def t(key, lang):
     lang = lang if lang in TRANSLATIONS else "ar"
     return TRANSLATIONS[lang].get(key, TRANSLATIONS["ar"][key])
+
+
+# ── ترجمة تلقائية ومجانية للمحتوى الذي يكتبه الأدمن (بدون أي مفتاح API) ──
+# تتطلب تثبيت مكتبة deep-translator على سيرفر الاستضافة: pip install deep-translator
+try:
+    from deep_translator import GoogleTranslator as _GoogleTranslator
+    _TRANSLATOR_AVAILABLE = True
+except Exception:
+    _TRANSLATOR_AVAILABLE = False
+
+
+def translate_text(text, target_lang):
+    """
+    يترجم نصاً عربياً كتبه الأدمن إلى الإنجليزية تلقائياً عبر خدمة مجانية.
+    عند أي فشل (لا إنترنت، المكتبة غير مثبّتة، النص فارغ...) يرجع النص الأصلي
+    كما هو بدل أن يتعطل البوت.
+    """
+    text = (text or "").strip()
+    if not text or target_lang == "ar" or not _TRANSLATOR_AVAILABLE:
+        return text
+    try:
+        return _GoogleTranslator(source="ar", target="en").translate(text)
+    except Exception:
+        logger.exception("فشلت الترجمة التلقائية، سيُعرض النص الأصلي بدلاً منها")
+        return text
+
+
+def localized_field(container, field, lang, translate_fn=None):
+    """
+    يرجع نسخة الحقل المترجمة (مثلاً name أو content) حسب لغة المستخدم، مع تخزين
+    الترجمة داخل نفس العنصر (field + '_en') بشكل دائم كي لا تُعاد الترجمة في كل
+    مرة (أسرع، ويعمل حتى لو صار انقطاع مؤقت لاحقاً في خدمة الترجمة).
+    يرجع True في العنصر الثاني إذا تمت ترجمة جديدة الآن (لحفظها لاحقاً دفعة واحدة).
+    """
+    original = container.get(field, "") or ""
+    if lang != "en":
+        return original, False
+    cache_key = f"{field}_en"
+    cached = container.get(cache_key)
+    if cached:
+        return cached, False
+    translated = (translate_fn or translate_text)(original, "en")
+    container[cache_key] = translated
+    return translated, True
 
 
 # قائمة دول العالم مقسّمة حسب القارة: (رمز الدولة، الاسم بالعربية)
@@ -804,15 +852,17 @@ def extract_content(message):
         return "text", message.text or "", caption
 
 
-def send_content(cid, btn, back_markup):
+def send_content(cid, btn, back_markup, lang="ar", db=None):
     ct = btn.get("content_type", "text")
-    content = btn.get("content", "")
-    caption = btn.get("caption", "")
-    name = btn.get("name", "")
+    content, ch1 = localized_field(btn, "content", lang)
+    caption, ch2 = localized_field(btn, "caption", lang)
+    name, ch3 = localized_field(btn, "name", lang)
+    if db is not None and (ch1 or ch2 or ch3):
+        save_db(db)
 
     if not content:
         bot.send_message(
-            cid, f"ℹ️ {name}\n\n(لا يوجد محتوى بعد.)", reply_markup=back_markup
+            cid, f"ℹ️ {name}\n\n{t('no_content_yet', lang)}", reply_markup=back_markup
         )
         return
 
@@ -869,19 +919,22 @@ def edit_or_replace(cid, mid, is_current_text, text, markup=None, parse_mode=Non
     bot.send_message(cid, text, reply_markup=markup, parse_mode=parse_mode)
 
 
-def show_leaf_content(cid, mid, is_current_text, btn, back_markup):
+def show_leaf_content(cid, mid, is_current_text, btn, back_markup, lang="ar", db=None):
     """
-    يعرض محتوى زر نهائي (خدمة/ميزة بدون قوائم فرعية) مكان الرسالة الحالية:
+    يعرض محتوى زر نهائي (خدمة/ميزة بدون قوائم فرعية) مكان الرسالة الحالية، مترجماً
+    تلقائياً حسب لغة المستخدم:
     - إذا كان المحتوى نصاً والرسالة الحالية نصية أيضاً: يعدّل الرسالة مكانها.
     - غير ذلك (تحويل من نص إلى صورة/ملف أو العكس): يحذف الرسالة القديمة ثم يرسل
       المحتوى الجديد، بحيث تبقى رسالة واحدة فقط بدل تراكم الرسائل.
     """
     ct = btn.get("content_type", "text")
-    content = btn.get("content", "")
-    name = btn.get("name", "")
+    content, ch1 = localized_field(btn, "content", lang)
+    name, ch2 = localized_field(btn, "name", lang)
+    if db is not None and (ch1 or ch2):
+        save_db(db)
 
     if ct == "text" and is_current_text:
-        text = content if content else f"ℹ️ {name}\n\n(لا يوجد محتوى بعد.)"
+        text = content if content else f"ℹ️ {name}\n\n{t('no_content_yet', lang)}"
         try:
             bot.edit_message_text(text, cid, mid, reply_markup=back_markup)
             return
@@ -892,7 +945,7 @@ def show_leaf_content(cid, mid, is_current_text, btn, back_markup):
         bot.delete_message(cid, mid)
     except Exception:
         pass
-    send_content(cid, btn, back_markup)
+    send_content(cid, btn, back_markup, lang=lang)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -902,20 +955,29 @@ def show_leaf_content(cid, mid, is_current_text, btn, back_markup):
 def build_nav_markup(db, parent_id=None, user_rec=None):
     children = get_children(db, parent_id)
     markup = types.InlineKeyboardMarkup()
+    lang = (user_rec or {}).get("language") or "ar"
+    needs_save = False
 
     if parent_id is None:
         # قائمة موحّدة بعمودين تجمع كل أزرار المستوى الرئيسي معاً (الأقسام/الخدمات + الأزرار الثابتة)
-        gift_name = db.get("gift_name", "الهدية اليومية")
-        ref_name = db.get("ref_name", "رابط الإحالة")
-        gift_code_btn_name = db.get("gift_code_btn_name", "🎟️ كود هدية 🎁")
-        my_info_btn_name = db.get("my_info_btn_name", "👤 معلوماتي")
-        language_btn_name = db.get("language_btn_name", "🗣️ لغة البوت")
+        gift_name, ch = localized_field(db, "gift_name", lang)
+        needs_save = needs_save or ch
+        ref_name, ch = localized_field(db, "ref_name", lang)
+        needs_save = needs_save or ch
+        gift_code_btn_name, ch = localized_field(db, "gift_code_btn_name", lang)
+        needs_save = needs_save or ch
+        my_info_btn_name, ch = localized_field(db, "my_info_btn_name", lang)
+        needs_save = needs_save or ch
+        language_btn_name, ch = localized_field(db, "language_btn_name", lang)
+        needs_save = needs_save or ch
 
         items = []
         for btn in children:
+            name, ch = localized_field(btn, "name", lang)
+            needs_save = needs_save or ch
             is_locked = int(btn.get("unlock_points", 0)) > 0
             lock_icon = " 🔒" if is_locked else ""
-            items.append((f"{btn['name']}{lock_icon}", f"nav_{btn['id']}"))
+            items.append((f"{name}{lock_icon}", f"nav_{btn['id']}"))
 
         items.append((gift_name, "gift_claim"))
         items.append((ref_name, "ref_link_info"))
@@ -938,21 +1000,25 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
         for i in range(0, len(children), 2):
             row_buttons = []
             for btn in children[i:i + 2]:
+                name, ch = localized_field(btn, "name", lang)
+                needs_save = needs_save or ch
                 is_locked = int(btn.get("unlock_points", 0)) > 0
                 lock_icon = " 🔒" if is_locked else ""
                 row_buttons.append(
-                    types.InlineKeyboardButton(f"{btn['name']}{lock_icon}", callback_data=f"nav_{btn['id']}")
+                    types.InlineKeyboardButton(f"{name}{lock_icon}", callback_data=f"nav_{btn['id']}")
                 )
             markup.row(*row_buttons)
 
         parent = get_button(db, parent_id)
         back_to = parent.get("parent_id") if parent else None
-        lang = (user_rec or {}).get("language") or "ar"
         markup.add(
             types.InlineKeyboardButton(
                 t("back", lang), callback_data=f"nav_back_{back_to if back_to else 'root'}"
             )
         )
+
+    if needs_save:
+        save_db(db)
     return markup
 
 
@@ -1473,10 +1539,15 @@ def callback(call):
 
         elif data == "gift_code_prompt":
             set_state(uid, WAIT_ENTER_GIFT_CODE)
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="nav_back_root"))
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء" if lang == "ar" else "🔙 Cancel", callback_data="nav_back_root"))
             db_local = load_db()
-            prompt_text = db_local.get("gift_code_prompt_text_template", DEFAULT_CONFIG["gift_code_prompt_text_template"])
+            if "gift_code_prompt_text_template" not in db_local:
+                db_local["gift_code_prompt_text_template"] = DEFAULT_CONFIG["gift_code_prompt_text_template"]
+            prompt_text, ch = localized_field(db_local, "gift_code_prompt_text_template", lang)
+            if ch:
+                save_db(db_local)
             edit_or_replace(
                 cid, mid, call.message.content_type == "text",
                 prompt_text,
@@ -1837,6 +1908,7 @@ def callback(call):
             return
 
         if data == "ref_link_info":
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
             try:
                 bot_username = bot.get_me().username
             except Exception:
@@ -1863,7 +1935,7 @@ def callback(call):
                 medal = medals[idx] if idx < len(medals) else "🏅"
                 top_lines.append(f"{medal} : ({count}) -> {u_id}")
             
-            top_text = "\n".join(top_lines) if top_lines else "لا يوجد مستخدمون بعد."
+            top_text = "\n".join(top_lines) if top_lines else translate_text("لا يوجد مستخدمون بعد.", lang)
             
             db_local = load_db()
             ref_template = db_local.get("ref_info_text_template", DEFAULT_CONFIG["ref_info_text_template"])
@@ -1871,13 +1943,15 @@ def callback(call):
                 ref_msg = ref_template.format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
             except Exception:
                 ref_msg = DEFAULT_CONFIG["ref_info_text_template"].format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
+            ref_msg = translate_text(ref_msg, lang)
             
             back_markup = types.InlineKeyboardMarkup()
-            back_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
+            back_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
             edit_or_replace(cid, mid, call.message.content_type == "text", ref_msg, markup=back_markup)
             return
 
         if data == "my_info":
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
             users_data = load_users()
             uid_str = str(uid)
             user_rec = users_data["users"].get(uid_str, {})
@@ -1899,14 +1973,16 @@ def callback(call):
                 info_text = info_template.format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
             except Exception:
                 info_text = DEFAULT_CONFIG["my_info_text_template"].format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
+            info_text = translate_text(info_text, lang)
 
             info_markup = types.InlineKeyboardMarkup(row_width=1)
-            info_markup.add(types.InlineKeyboardButton("ما فُتح من أزرار📮", callback_data="my_unlocked"))
-            info_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
+            info_markup.add(types.InlineKeyboardButton(translate_text("ما فُتح من أزرار📮", lang), callback_data="my_unlocked"))
+            info_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
             edit_or_replace(cid, mid, call.message.content_type == "text", info_text, markup=info_markup, parse_mode="Markdown")
             return
 
         if data == "my_unlocked":
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
             db = load_db()
             users_data = load_users()
             uid_str = str(uid)
@@ -1915,25 +1991,30 @@ def callback(call):
 
             lines = []
             total_points = 0
+            needs_save = False
             for btn_id in unlocked_ids:
                 btn = get_button(db, btn_id)
                 if not btn:
                     continue
                 pts = int(btn.get("unlock_points", 0))
                 total_points += pts
-                lines.append(f"• {btn['name']} — {pts} نقطة")
+                btn_name, ch = localized_field(btn, "name", lang)
+                needs_save = needs_save or ch
+                lines.append(f"• {btn_name} — {pts} " + translate_text("نقطة", lang))
+            if needs_save:
+                save_db(db)
 
             if lines:
                 body = (
-                    f"🔓 عدد الخدمات المقفولة التي فتحتها: {len(lines)}\n"
-                    f"💰 إجمالي النقاط التي دفعتها لفتحها: {total_points}\n\n"
+                    translate_text(f"🔓 عدد الخدمات المقفولة التي فتحتها: {len(lines)}", lang) + "\n"
+                    + translate_text(f"💰 إجمالي النقاط التي دفعتها لفتحها: {total_points}", lang) + "\n\n"
                     + "\n".join(lines)
                 )
             else:
-                body = "لم يتم فتح ميزة/خدمة مقفلة إلى الآن (حالياً)."
+                body = translate_text("لم يتم فتح ميزة/خدمة مقفلة إلى الآن (حالياً).", lang)
 
             unlocked_markup = types.InlineKeyboardMarkup()
-            unlocked_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="my_info"))
+            unlocked_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="my_info"))
             edit_or_replace(cid, mid, call.message.content_type == "text", body, markup=unlocked_markup)
             return
 
@@ -2093,16 +2174,22 @@ def callback(call):
                 bot.send_message(cid, "⚠️ هذا الزر لم يعد موجوداً.")
                 return
 
+            user_rec_here = get_user(str(uid))
+            lang = (user_rec_here or {}).get("language") or "ar"
+
             if get_children(db, btn_id):
+                section_name, ch = localized_field(btn, "name", lang)
+                if ch:
+                    save_db(db)
                 bot.edit_message_text(
-                    btn["name"], cid, mid, reply_markup=build_nav_markup(db, btn_id, user_rec=get_user(str(uid)))
+                    section_name, cid, mid, reply_markup=build_nav_markup(db, btn_id, user_rec=user_rec_here)
                 )
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
                 
                 is_current_text = call.message.content_type == "text"
                 if uid == ADMIN_ID:
-                    show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn))
+                    show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn), lang=lang, db=db)
                 elif unlock_pts > 0:
                     users_db = load_users()
                     uid_str = str(uid)
@@ -2110,9 +2197,13 @@ def callback(call):
                     user_unlocked = user_data_db.get("unlocked", [])
                     
                     if btn_id in user_unlocked:
-                        show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn))
+                        show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn), lang=lang, db=db)
                     else:
-                        desc = btn.get("unlock_desc", "هذا المحتوى حصري ومقفول.")
+                        desc, ch = localized_field(btn, "unlock_desc", lang)
+                        if not desc:
+                            desc = t("locked_default_desc", lang)
+                        if ch:
+                            save_db(db)
                         markup = types.InlineKeyboardMarkup()
                         markup.add(types.InlineKeyboardButton(f"🔓 فتح الخدمة بـ {unlock_pts} نقطة", callback_data=f"pay_{btn_id}"))
                         markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data=f"nav_back_{btn.get('parent_id', 'root')}"))
@@ -2128,17 +2219,19 @@ def callback(call):
                         else:
                             bot.edit_message_text(payment_text, cid, mid, reply_markup=markup, parse_mode="Markdown")
                 else:
-                    show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn))
+                    show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn), lang=lang, db=db)
             return
 
         if data == "gift_claim":
             db = load_db()
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
             back_markup = types.InlineKeyboardMarkup()
-            back_markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="nav_back_root"))
+            back_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
             if not db.get("gift_active", True):
                 msg = "⚠️ خدمة الهدية اليومية متوقفة مؤقتاً من قبل الإدارة."
             else:
                 success, msg = claim_daily_gift(uid)
+            msg = translate_text(msg, lang)
             edit_or_replace(cid, mid, call.message.content_type == "text", msg, markup=back_markup)
             return
 
@@ -3318,4 +3411,3 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
-            
