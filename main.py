@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import uuid
 import time
 import logging
@@ -153,8 +154,8 @@ def get_display_name(user):
     return name
 
 
-def main_menu_welcome_text(user):
-    return f"👋 أهلاً بك {get_display_name(user)}! اختر من القائمة:"
+def main_menu_welcome_text(user, lang="ar"):
+    return t("welcome", lang).format(name=get_display_name(user))
 
 
 # ── Force-subscribe channels ────────────────────────────────────
@@ -164,6 +165,57 @@ REQUIRED_CHANNELS = ["@Salemly_1", "@shr_llh"]
 def flag(country_code):
     """يحوّل رمز الدولة الدولي (مثل EG) إلى إيموجي علمها تلقائياً."""
     return "".join(chr(0x1F1E6 + ord(c) - ord('A')) for c in country_code.upper())
+
+
+# نطاقات اليونيكود الشائعة للإيموجي، تُستخدم لاكتشاف الإيموجي في بداية اسم الزر
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002190-\U000021FF"
+    "\U00002B00-\U00002BFF"
+    "\U0001F000-\U0001F0FF"
+    "\uFE0F\u200D"
+    "]+"
+)
+
+
+def extract_leading_emoji(text):
+    """يستخرج الإيموجي (إن وُجد) من بداية النص."""
+    match = _EMOJI_PATTERN.match((text or "").strip())
+    return match.group(0).strip() if match else ""
+
+
+def merge_emoji(old_name, new_text):
+    """
+    عند تعديل اسم زر: إذا كان النص الجديد لا يبدأ بإيموجي، يحافظ تلقائياً على إيموجي
+    الاسم القديم (إن وُجد) في نفس المكان، بدل أن يختفي عند تعديل الاسم فقط.
+    إذا كتب الأدمن إيموجي جديداً في بداية النص الجديد، يُستخدم هو (تغيير مقصود).
+    """
+    new_text = (new_text or "").strip()
+    if _EMOJI_PATTERN.match(new_text):
+        return new_text
+    old_emoji = extract_leading_emoji(old_name)
+    return f"{old_emoji} {new_text}" if old_emoji else new_text
+
+
+# نصوص واجهة ثابتة (ليست من صنع الأدمن) تتغيّر تلقائياً حسب لغة المستخدم المختارة
+TRANSLATIONS = {
+    "ar": {
+        "welcome": "👋 أهلاً بك {name}! اختر من القائمة:",
+        "back": "🔙 رجوع",
+    },
+    "en": {
+        "welcome": "👋 Welcome {name}! Choose from the menu:",
+        "back": "🔙 Back",
+    },
+}
+
+
+def t(key, lang):
+    lang = lang if lang in TRANSLATIONS else "ar"
+    return TRANSLATIONS[lang].get(key, TRANSLATIONS["ar"][key])
 
 
 # قائمة دول العالم مقسّمة حسب القارة: (رمز الدولة، الاسم بالعربية)
@@ -293,13 +345,13 @@ DEFAULT_CONFIG = {
     "users": [],
     "banned_users": [],
     "gift_points": 2,
-    "gift_name": "الهدية اليومية",
+    "gift_name": "🎁 الهدية اليومية",
     "gift_active": True,
     "sub_active": True,
     "sub_channels": REQUIRED_CHANNELS.copy(),
     "ref_active": True,
     "ref_points": 2,
-    "ref_name": "نظام الإحالة",
+    "ref_name": "🔗 رابط الإحالة",
     "welcome_active": True,
     "welcome_points": 1,
     "welcome_name": "مكافأة التسجيل",
@@ -373,6 +425,17 @@ def load_db():
     
     res = dict(doc)
     res.pop("_id", None)
+
+    # ترحيل لمرة واحدة فقط: قديماً كان إيموجي الهدية/الإحالة مثبّتاً بالكود، الآن صار جزءاً
+    # من الاسم نفسه (يقدر الأدمن يحذفه أو ينقله). هذا يمنع اختفاء الإيموجي من البوتات
+    # الشغّالة أصلاً عند أول تشغيل لهذا التحديث، ولا يتكرر بعد ذلك.
+    if not res.get("_gift_ref_emoji_migrated"):
+        if not extract_leading_emoji(res.get("gift_name", "")):
+            res["gift_name"] = f"🎁 {res.get('gift_name', 'الهدية اليومية')}".strip()
+        if not extract_leading_emoji(res.get("ref_name", "")):
+            res["ref_name"] = f"🔗 {res.get('ref_name', 'رابط الإحالة')}".strip()
+        res["_gift_ref_emoji_migrated"] = True
+        save_db(res)
 
     # يضمن أن لكل زر رقم ترتيب (order) ضمن إخوته، حتى الأزرار القديمة التي لا تملكه بعد
     order_counters = {}
@@ -854,8 +917,8 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
             lock_icon = " 🔒" if is_locked else ""
             items.append((f"{btn['name']}{lock_icon}", f"nav_{btn['id']}"))
 
-        items.append((f"🎁 {gift_name}", "gift_claim"))
-        items.append((f"🔗 {ref_name}", "ref_link_info"))
+        items.append((gift_name, "gift_claim"))
+        items.append((ref_name, "ref_link_info"))
         items.append((gift_code_btn_name, "gift_code_prompt"))
         items.append((my_info_btn_name, "my_info"))
         items.append((language_btn_name, "language_menu"))
@@ -884,9 +947,10 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
 
         parent = get_button(db, parent_id)
         back_to = parent.get("parent_id") if parent else None
+        lang = (user_rec or {}).get("language") or "ar"
         markup.add(
             types.InlineKeyboardButton(
-                "🔙 رجوع", callback_data=f"nav_back_{back_to if back_to else 'root'}"
+                t("back", lang), callback_data=f"nav_back_{back_to if back_to else 'root'}"
             )
         )
     return markup
@@ -898,7 +962,8 @@ def render_main_menu(cid, mid, is_current_text, user_obj, prefix_text="", user_r
         db = load_db()
     if user_rec is None:
         user_rec = get_user(str(user_obj.id))
-    welcome_msg = (prefix_text + "\n" if prefix_text else "") + main_menu_welcome_text(user_obj)
+    lang = (user_rec or {}).get("language") or "ar"
+    welcome_msg = (prefix_text + "\n" if prefix_text else "") + main_menu_welcome_text(user_obj, lang)
     markup = build_nav_markup(db, None, user_rec=user_rec)
 
     if mid:
@@ -2005,12 +2070,12 @@ def callback(call):
             if data.startswith("nav_back_"):
                 target = data[len("nav_back_") :]
                 parent_id = None if target == "root" else target
+                user_rec_for_markup = get_user(str(uid)) if parent_id is None else None
                 text = (
-                    main_menu_welcome_text(call.from_user)
+                    main_menu_welcome_text(call.from_user, (user_rec_for_markup or {}).get("language") or "ar")
                     if parent_id is None
                     else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
                 )
-                user_rec_for_markup = get_user(str(uid)) if parent_id is None else None
                 nav_markup = build_nav_markup(db, parent_id, user_rec=user_rec_for_markup)
                 if call.message.content_type != "text":
                     try:
@@ -2030,7 +2095,7 @@ def callback(call):
 
             if get_children(db, btn_id):
                 bot.edit_message_text(
-                    btn["name"], cid, mid, reply_markup=build_nav_markup(db, btn_id)
+                    btn["name"], cid, mid, reply_markup=build_nav_markup(db, btn_id, user_rec=get_user(str(uid)))
                 )
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
@@ -2938,6 +3003,7 @@ def handle_state(message):
             return
         new_name = message.text.strip()
         db = load_db()
+        new_name = merge_emoji(db.get("gift_code_btn_name", ""), new_name)
         db["gift_code_btn_name"] = new_name
         save_db(db)
         clear_state(uid)
@@ -2958,6 +3024,7 @@ def handle_state(message):
             return
         new_name = message.text.strip()
         db = load_db()
+        new_name = merge_emoji(db.get("my_info_btn_name", ""), new_name)
         db["my_info_btn_name"] = new_name
         save_db(db)
         clear_state(uid)
@@ -2978,6 +3045,7 @@ def handle_state(message):
             return
         new_name = message.text.strip()
         db = load_db()
+        new_name = merge_emoji(db.get("language_btn_name", ""), new_name)
         db["language_btn_name"] = new_name
         save_db(db)
         clear_state(uid)
@@ -3030,7 +3098,7 @@ def handle_state(message):
             return
         
         if edit_key == "name":
-            btn["name"] = new_value
+            btn["name"] = merge_emoji(btn.get("name", ""), new_value)
         elif edit_key == "content":
             btn["content"] = new_value
         elif edit_key == "points":
