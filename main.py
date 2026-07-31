@@ -355,6 +355,13 @@ WAIT_MYINFO_BTN_NAME = "WAIT_MYINFO_BTN_NAME"
 WAIT_COUNTRY_GATE_TEXT = "WAIT_COUNTRY_GATE_TEXT"
 WAIT_LANGUAGE_GATE_TEXT = "WAIT_LANGUAGE_GATE_TEXT"
 WAIT_LANGUAGE_BTN_NAME = "WAIT_LANGUAGE_BTN_NAME"
+WAIT_TASKS_BTN_NAME = "WAIT_TASKS_BTN_NAME"
+WAIT_TASK_NAME = "WAIT_TASK_NAME"
+WAIT_TASK_DESC = "WAIT_TASK_DESC"
+WAIT_TASK_CHANNEL = "WAIT_TASK_CHANNEL"
+WAIT_TASK_POINTS = "WAIT_TASK_POINTS"
+WAIT_SUPPORT_MESSAGE = "WAIT_SUPPORT_MESSAGE"
+WAIT_SUPPORT_RECEIVED_TEXT = "WAIT_SUPPORT_RECEIVED_TEXT"
 WAIT_WELCOME_NAME = "WAIT_WELCOME_NAME"
 WAIT_LOCK_POINTS = "WAIT_LOCK_POINTS"
 WAIT_LOCK_DESC = "WAIT_LOCK_DESC"
@@ -410,12 +417,17 @@ DEFAULT_CONFIG = {
     "gift_claim_text_template": "🎁 تهانينا! حصلت على {points} نقاط من ({gift_name})!\nرصيدك الحالي: {balance} نقطة 🌟",
     "ref_info_text_template": "رابط الدعوة ( {ref_link} )\n\nعدد دعوتك ( {my_invites} )\n\nافضل توب 5 بعدد دعوات\n{top_text}",
     "gift_code_prompt_text_template": "🎟️ **استبدال كود الهدية أو المسابقة:**\n\nأرسل الآن الكود الذي حصلت عليه في المسابقة لاستلام نقاطك فوراً:\n/cancel للإلغاء",
-    "my_info_text_template": "👤 **معلوماتي:**\n\n👤 الاسم: {name}\n🆔 الآيدي: `{id}`\n🌟 نقاطك الحالية: {points}\n🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {invites} دعوة)",
+    "my_info_text_template": "👤 **معلوماتي:**\n\n👤 الاسم: {name}\n🆔 الآيدي: {id}\n🌟 نقاطك الحالية: {points}\n🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {invites} دعوة)",
     "country_gate_active": True,
     "country_gate_points": 1,
     "country_gate_text": "🌍 **قبل ما نكمل...**\n\nحاب تختار دولتك أو مكان إقامتك؟ اختيارك اختياري تماماً، وإذا اخترت دولتك تحصل على نقطة إضافية 🎁\n\nاختر قارتك أولاً:",
     "language_gate_text": "🗣️ **اختر لغتك المفضلة للتعامل مع البوت:**\n\n(هذا الاختيار اختياري ويمكنك تخطيه)",
-    "language_btn_name": "🗣️ لغة البوت"
+    "language_btn_name": "🗣️ لغة البوت",
+    "tasks": [],
+    "tasks_btn_name": "🎯 مهام مقابل نقاط",
+    "tasks_menu_text": "🎯 **مهام مقابل نقاط:**\n\nأكمل أي مهمة من المهام التالية لتحصل على نقاط إضافية فوراً بعد التحقق:",
+    "support_btn_id": None,
+    "support_received_text": "✅ تم استلام رسالتك بنجاح وهي الآن قيد المراجعة، وسيتم الرد عليك في أقرب وقت ممكن. شكراً لتواصلك معنا! 🙏"
 }
 
 FIXED_ITEMS = {
@@ -454,6 +466,12 @@ FIXED_ITEMS = {
         "name_cb": "edit_language_btn_name",
         "text_key": "language_gate_text",
         "placeholders": "لا توجد متغيرات — هذا نص ثابت. يظهر هذا النص بعد شاشة اختيار الدولة، وأيضاً عند الضغط على زر «لغة البوت» من القائمة الرئيسية.",
+    },
+    "tasks_menu": {
+        "label": "🎯 مهام مقابل نقاط",
+        "name_cb": "edit_tasks_btn_name",
+        "text_key": "tasks_menu_text",
+        "placeholders": "لا توجد متغيرات — هذا نص مقدمة قائمة المهام. تدار المهام نفسها (الاسم/الوصف/القناة/النقاط) من زر «🎯 إدارة مهام النقاط» في لوحة التحكم مباشرة، وليس من هنا.",
     },
 }
 
@@ -495,6 +513,12 @@ def load_db():
             order_changed = True
         order_counters[pid] = max(order_counters.get(pid, 0), b["order"] + 1)
     if order_changed:
+        save_db(res)
+
+    # ترحيل لمرة واحدة: كان القالب الافتراضي يضع {id} داخل اقتباسات (`{id}`) بصيغة كود،
+    # الآن أصبح رابطاً قابلاً للضغط يفتح حساب المستخدم مباشرة، فيجب أن يكون بلا اقتباسات.
+    if "`{id}`" in res.get("my_info_text_template", ""):
+        res["my_info_text_template"] = res["my_info_text_template"].replace("`{id}`", "{id}")
         save_db(res)
 
     return res
@@ -604,12 +628,14 @@ def process_start(user_obj, args):
     is_new = user_rec is None or not user_rec.get("name")
 
     if not user_rec:
+        today_str = time.strftime("%Y-%m-%d", time.gmtime())
         user_rec = {
             "name": name, "points": 0, "unlocked": [], "referred_by": None,
             "referral_rewarded": False, "referrals_count": 0,
             "welcome_bonus_received": False, "country": None, "country_asked": False,
             "country_bonus_given": False, "language": None, "language_asked": False,
-            "visits": 0
+            "visits": 0, "joined_date": today_str, "last_visit_date": today_str,
+            "total_gift_claims": 0, "completed_tasks": []
         }
     else:
         for key, default in (
@@ -617,7 +643,8 @@ def process_start(user_obj, args):
             ("referral_rewarded", False), ("referrals_count", 0),
             ("welcome_bonus_received", False), ("country", None),
             ("country_asked", False), ("country_bonus_given", False),
-            ("language", None), ("language_asked", False), ("visits", 0)
+            ("language", None), ("language_asked", False), ("visits", 0),
+            ("total_gift_claims", 0), ("completed_tasks", [])
         ):
             user_rec.setdefault(key, default)
         if name:
@@ -650,6 +677,7 @@ def process_start(user_obj, args):
             user_rec["referral_rewarded"] = True
 
     user_rec["visits"] = user_rec.get("visits", 0) + 1
+    user_rec["last_visit_date"] = time.strftime("%Y-%m-%d", time.gmtime())
 
     save_user(uid_str, user_rec)
     if referrer_rec:
@@ -791,6 +819,7 @@ def claim_daily_gift(user_id):
     
     user["points"] = user.get("points", 0) + current_gift_points
     user["last_gift"] = now
+    user["total_gift_claims"] = user.get("total_gift_claims", 0) + 1
     save_user(uid, user)
     
     gift_name = db.get("gift_name", "الهدية اليومية")
@@ -930,7 +959,12 @@ def show_leaf_content(cid, mid, is_current_text, btn, back_markup, lang="ar", db
     ct = btn.get("content_type", "text")
     content, ch1 = localized_field(btn, "content", lang)
     name, ch2 = localized_field(btn, "name", lang)
-    if db is not None and (ch1 or ch2):
+    btn["clicks"] = btn.get("clicks", 0) + 1
+    if db is not None:
+        for b in db.get("buttons", []):
+            if b.get("id") == btn.get("id"):
+                b["clicks"] = btn["clicks"]
+                break
         save_db(db)
 
     if ct == "text" and is_current_text:
@@ -970,20 +1004,25 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
         needs_save = needs_save or ch
         language_btn_name, ch = localized_field(db, "language_btn_name", lang)
         needs_save = needs_save or ch
+        tasks_btn_name, ch = localized_field(db, "tasks_btn_name", lang)
+        needs_save = needs_save or ch
 
         items = []
         for btn in children:
             name, ch = localized_field(btn, "name", lang)
             needs_save = needs_save or ch
-            is_locked = int(btn.get("unlock_points", 0)) > 0
-            lock_icon = " 🔒" if is_locked else ""
-            items.append((f"{name}{lock_icon}", f"nav_{btn['id']}"))
+            unlock_pts = int(btn.get("unlock_points", 0))
+            is_locked = unlock_pts > 0
+            label = f"{unlock_pts} نقطة 🔒" if is_locked else name
+            items.append((label, f"nav_{btn['id']}"))
 
         items.append((gift_name, "gift_claim"))
         items.append((ref_name, "ref_link_info"))
         items.append((gift_code_btn_name, "gift_code_prompt"))
         items.append((my_info_btn_name, "my_info"))
         items.append((language_btn_name, "language_menu"))
+        if any(task.get("active", True) for task in db.get("tasks", [])):
+            items.append((tasks_btn_name, "tasks_menu"))
 
         for i in range(0, len(items), 2):
             row = items[i:i + 2]
@@ -1002,10 +1041,11 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
             for btn in children[i:i + 2]:
                 name, ch = localized_field(btn, "name", lang)
                 needs_save = needs_save or ch
-                is_locked = int(btn.get("unlock_points", 0)) > 0
-                lock_icon = " 🔒" if is_locked else ""
+                unlock_pts = int(btn.get("unlock_points", 0))
+                is_locked = unlock_pts > 0
+                label = f"{unlock_pts} نقطة 🔒" if is_locked else name
                 row_buttons.append(
-                    types.InlineKeyboardButton(f"{name}{lock_icon}", callback_data=f"nav_{btn['id']}")
+                    types.InlineKeyboardButton(label, callback_data=f"nav_{btn['id']}")
                 )
             markup.row(*row_buttons)
 
@@ -1108,7 +1148,7 @@ def render_language_gate(cid, mid, is_current_text, prefix_text="", db=None):
 def enter_bot_gate(cid, mid, is_current_text, user_obj, prefix_text="", db=None, user_rec=None):
     """
     يقرر الشاشة التالية بعد التسجيل/التحقق من الاشتراك:
-    شاشة اختيار الدولة (إن لم تُعرض من قبل)، ثم شاشة اللغة، ثم القائمة الرئيسية.
+    شاشة اختيار اللغة أولاً (إن لم تُعرض من قبل)، ثم شاشة اختيار الدولة، ثم القائمة الرئيسية.
     mid=None يعني إرسال رسالة جديدة، وإلا يُعدَّل مكان الرسالة الحالية.
     يقبل db/user_rec جاهزَين (إن توفّرا) لتفادي إعادة استعلام قاعدة البيانات.
     """
@@ -1118,12 +1158,13 @@ def enter_bot_gate(cid, mid, is_current_text, user_obj, prefix_text="", db=None,
     if user_rec is None:
         user_rec = get_user(uid_str) or {}
 
-    if db.get("country_gate_active", True) and not user_rec.get("country_asked"):
-        render_country_gate(cid, mid, is_current_text, prefix_text, db=db)
-    elif not user_rec.get("language_asked"):
+    if not user_rec.get("language_asked"):
         render_language_gate(cid, mid, is_current_text, prefix_text, db=db)
+    elif db.get("country_gate_active", True) and not user_rec.get("country_asked"):
+        render_country_gate(cid, mid, is_current_text, prefix_text, db=db)
     else:
         render_main_menu(cid, mid, is_current_text, user_obj, prefix_text, user_rec=user_rec, db=db)
+
 
 
 def back_only_markup(btn):
@@ -1192,6 +1233,15 @@ def render_button_management_screen(cid, mid, btn_id):
         markup.add(
             types.InlineKeyboardButton(f"📂 استعراض الأزرار الفرعية بداخله ({len(children)})", callback_data=f"adm_set_subnav_{btn_id}")
         )
+    else:
+        if db.get("support_btn_id") == btn_id:
+            markup.add(
+                types.InlineKeyboardButton("❌ إلغاء تفعيله كزر (تواصل مع الدعم)", callback_data=f"adm_support_unset_{btn_id}")
+            )
+        else:
+            markup.add(
+                types.InlineKeyboardButton("☎️ تفعيل هذا الزر كـ (تواصل مع الدعم)", callback_data=f"adm_support_set_{btn_id}")
+            )
 
     move_row = []
     if position > 0:
@@ -1209,8 +1259,9 @@ def render_button_management_screen(cid, mid, btn_id):
         f"🎛 **إدارة العنصر:** «{btn['name']}»\n\n"
         f"• النوع: {'قسم رئيسي/فرعي يحتوي على أزرار' if children else 'خدمة / زر نهائي'}\n"
         f"• عدد الأزرار الفرعية: {len(children)}\n"
-        f"• ترتيبه الحالي في القائمة الرئيسية بين إخوته: {position + 1} من {len(siblings)}\n\n"
-        f"اختر الإجراء المطلوب:",
+        f"• ترتيبه الحالي في القائمة الرئيسية بين إخوته: {position + 1} من {len(siblings)}\n"
+        + ("• ☎️ **هذا هو زر تواصل الدعم المفعّل حالياً.**\n" if db.get("support_btn_id") == btn_id else "")
+        + f"\nاختر الإجراء المطلوب:",
         cid, mid, reply_markup=markup, parse_mode="Markdown"
     )
     return True
@@ -1265,6 +1316,8 @@ ADMIN_PANEL_BUTTONS = [
     ("👥 إدارة المستخدمين", "adm_users"),
     ("📊 إحصائيات البوت", "adm_stats"),
     ("📣 إرسال إعلان والإعدادات", "adm_broadcast_menu"),
+    ("🎯 إدارة مهام النقاط", "adm_tasks_menu"),
+    ("☎️ إعدادات تواصل الدعم", "adm_support_settings"),
 ]
 
 
@@ -1537,6 +1590,125 @@ def callback(call):
             bot.edit_message_text("اختر كوداً آخر لحذفه أو ارجع:", cid, mid, reply_markup=markup)
             return
 
+        # ── إدارة مهام النقاط (انضمام لقناة/مجموعة/بوت مقابل نقاط) ──
+        elif data == "adm_tasks_menu":
+            db = load_db()
+            tasks = db.get("tasks", [])
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            for task in tasks:
+                completed_count = sum(
+                    1 for u in load_users().get("users", {}).values()
+                    if task["id"] in u.get("completed_tasks", [])
+                )
+                markup.add(types.InlineKeyboardButton(
+                    f"🎯 {task['name']} — {task['points']} نقطة ({completed_count} أكملها)",
+                    callback_data=f"adm_task_view_{task['id']}"
+                ))
+            markup.add(types.InlineKeyboardButton("➕ إضافة مهمة جديدة", callback_data="adm_task_add"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+            bot.edit_message_text(
+                "🎯 **إدارة مهام النقاط:**\n\n"
+                "كل مهمة = انضمام المستخدم لقناة/مجموعة/بوت تيليجرام معيّن، ويتحقق البوت من "
+                "انضمامه فعلياً قبل منحه النقاط (نفس آلية الاشتراك الإجباري بالضبط).\n\n"
+                f"عدد المهام الحالية: {len(tasks)}\n\n"
+                "اضغط على أي مهمة لتعديلها أو حذفها أو رؤية إحصائياتها:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "adm_task_add":
+            set_state(uid, WAIT_TASK_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_tasks_menu"))
+            bot.edit_message_text(
+                "✍️ **مهمة جديدة — الخطوة 1 من 4:**\n\n"
+                "أرسل الآن اسم المهمة (مثال: انضم لقناتنا الرسمية):\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data.startswith("adm_task_view_"):
+            task_id = data[len("adm_task_view_"):]
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.answer_callback_query(call.id, "⚠️ هذه المهمة لم تعد موجودة.", show_alert=True)
+                return
+            completed_count = sum(
+                1 for u in load_users().get("users", {}).values()
+                if task_id in u.get("completed_tasks", [])
+            )
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("📝 تعديل الاسم", callback_data=f"adm_task_edit_name_{task_id}"),
+                types.InlineKeyboardButton("📄 تعديل الوصف", callback_data=f"adm_task_edit_desc_{task_id}")
+            )
+            markup.add(
+                types.InlineKeyboardButton("📡 تعديل القناة/المجموعة", callback_data=f"adm_task_edit_channel_{task_id}"),
+                types.InlineKeyboardButton("🌟 تعديل عدد النقاط", callback_data=f"adm_task_edit_points_{task_id}")
+            )
+            markup.add(types.InlineKeyboardButton("🗑️ حذف هذه المهمة نهائياً", callback_data=f"adm_task_delete_{task_id}"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المهام", callback_data="adm_tasks_menu"))
+            bot.edit_message_text(
+                f"🎯 **تفاصيل المهمة:** «{task['name']}»\n\n"
+                f"• الوصف: {task.get('description', '(بدون وصف)')}\n"
+                f"• القناة/المجموعة/البوت المطلوب الانضمام إليه: `{task['target']}`\n"
+                f"• عدد النقاط عند الإكمال: {task['points']}\n"
+                f"• عدد المستخدمين الذين أكملوها: **{completed_count}**\n"
+                f"• إجمالي النقاط الممنوحة من هذه المهمة (تقديري بالسعر الحالي): {completed_count * task['points']}\n\n"
+                "اختر ما تريد تعديله:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data.startswith("adm_task_edit_name_"):
+            task_id = data[len("adm_task_edit_name_"):]
+            set_state(uid, WAIT_TASK_NAME, task_id=task_id, edit=True)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data=f"adm_task_view_{task_id}"))
+            bot.edit_message_text("✍️ أرسل الاسم الجديد للمهمة:", cid, mid, reply_markup=markup)
+            return
+
+        elif data.startswith("adm_task_edit_desc_"):
+            task_id = data[len("adm_task_edit_desc_"):]
+            set_state(uid, WAIT_TASK_DESC, task_id=task_id, edit=True)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data=f"adm_task_view_{task_id}"))
+            bot.edit_message_text("✍️ أرسل الوصف الجديد للمهمة:", cid, mid, reply_markup=markup)
+            return
+
+        elif data.startswith("adm_task_edit_channel_"):
+            task_id = data[len("adm_task_edit_channel_"):]
+            set_state(uid, WAIT_TASK_CHANNEL, task_id=task_id, edit=True)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data=f"adm_task_view_{task_id}"))
+            bot.edit_message_text(
+                "✍️ أرسل معرّف القناة/المجموعة/البوت الجديد (مثال: `@my_channel`)، "
+                "أو أضف البوت كمشرف في القناة/المجموعة أولاً حتى يقدر يتحقق من الانضمام:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data.startswith("adm_task_edit_points_"):
+            task_id = data[len("adm_task_edit_points_"):]
+            set_state(uid, WAIT_TASK_POINTS, task_id=task_id, edit=True)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data=f"adm_task_view_{task_id}"))
+            bot.edit_message_text("✍️ أرسل عدد النقاط الجديد لهذه المهمة (رقم صحيح):", cid, mid, reply_markup=markup)
+            return
+
+        elif data.startswith("adm_task_delete_"):
+            task_id = data[len("adm_task_delete_"):]
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            db["tasks"] = [t for t in db.get("tasks", []) if t["id"] != task_id]
+            save_db(db)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المهام", callback_data="adm_tasks_menu"))
+            name_txt = task["name"] if task else "المهمة"
+            bot.edit_message_text(f"✅ تم حذف مهمة «{name_txt}» نهائياً.", cid, mid, reply_markup=markup)
+            return
+
         elif data == "gift_code_prompt":
             set_state(uid, WAIT_ENTER_GIFT_CODE)
             lang = (get_user(str(uid)) or {}).get("language") or "ar"
@@ -1679,6 +1851,17 @@ def callback(call):
             bot.send_message(cid, "✍️ أرسل الآن النص الجديد لزر «لغة البوت» في القائمة الرئيسية:", reply_markup=markup)
             return
 
+        if data == "edit_tasks_btn_name":
+            set_state(uid, WAIT_TASKS_BTN_NAME)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_fixed_texts"))
+            try:
+                bot.delete_message(cid, mid)
+            except Exception:
+                pass
+            bot.send_message(cid, "✍️ أرسل الآن النص الجديد لزر «مهام مقابل نقاط» في القائمة الرئيسية:", reply_markup=markup)
+            return
+
         if data.startswith("adm_set_back_"):
             db = load_db()
             target = data[len("adm_set_back_"):]
@@ -1722,6 +1905,67 @@ def callback(call):
             save_db(db)
 
             render_button_management_screen(cid, mid, btn_id)
+            return
+
+        if data.startswith("adm_support_set_"):
+            btn_id = data[len("adm_support_set_"):]
+            db = load_db()
+            if not get_button(db, btn_id):
+                bot.answer_callback_query(call.id, "⚠️ هذا العنصر غير موجود.", show_alert=True)
+                return
+            db["support_btn_id"] = btn_id
+            save_db(db)
+            bot.answer_callback_query(call.id, "✅ تم تفعيل هذا الزر كزر تواصل مع الدعم.")
+            render_button_management_screen(cid, mid, btn_id)
+            return
+
+        if data.startswith("adm_support_unset_"):
+            btn_id = data[len("adm_support_unset_"):]
+            db = load_db()
+            if db.get("support_btn_id") == btn_id:
+                db["support_btn_id"] = None
+                save_db(db)
+            bot.answer_callback_query(call.id, "✅ تم إلغاء تفعيله كزر تواصل مع الدعم.")
+            render_button_management_screen(cid, mid, btn_id)
+            return
+
+        if data == "adm_support_settings":
+            db = load_db()
+            support_btn_id = db.get("support_btn_id")
+            support_btn = get_button(db, support_btn_id) if support_btn_id else None
+
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            if support_btn:
+                markup.add(types.InlineKeyboardButton(
+                    f"⚙️ فتح إدارة الزر المفعّل: «{support_btn['name']}»", callback_data=f"adm_set_click_{support_btn_id}"
+                ))
+            markup.add(types.InlineKeyboardButton("✏️ تعديل رسالة الاستلام (الرد التلقائي)", callback_data="adm_edit_support_text"))
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لوحة التحكم", callback_data="adm_back_main"))
+
+            status = (
+                f"☎️ الزر المفعّل حالياً: «{support_btn['name']}»" if support_btn
+                else "⚠️ لم يتم تفعيل أي زر كـ (تواصل مع الدعم) بعد."
+            )
+            bot.edit_message_text(
+                "☎️ **إعدادات تواصل الدعم:**\n\n"
+                f"{status}\n\n"
+                "📩 رسالة الاستلام الحالية (تُرسل تلقائياً لأي مستخدم بعد إرسال رسالته):\n"
+                f"«{db.get('support_received_text', DEFAULT_CONFIG['support_received_text'])}»\n\n"
+                "ℹ️ لتفعيل زر معيّن كزر تواصل الدعم: ادخل له من «⚙️ إعدادات الخدمات والأزرار» "
+                "ثم اضغط «☎️ تفعيل هذا الزر كـ (تواصل مع الدعم)».\n\n"
+                "اختر ما تريد:",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        if data == "adm_edit_support_text":
+            set_state(uid, WAIT_SUPPORT_RECEIVED_TEXT)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_support_settings"))
+            bot.edit_message_text(
+                "✍️ أرسل الآن نص الرد التلقائي الذي سيصل لأي مستخدم بعد إرسال رسالته لزر تواصل الدعم:\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup
+            )
             return
 
         if data.startswith("adm_set_subnav_"):
@@ -1944,10 +2188,12 @@ def callback(call):
             except Exception:
                 ref_msg = DEFAULT_CONFIG["ref_info_text_template"].format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
             ref_msg = translate_text(ref_msg, lang)
-            
+            for u_id, _ in top_5:
+                ref_msg = ref_msg.replace(str(u_id), f"[{u_id}](tg://user?id={u_id})", 1)
+
             back_markup = types.InlineKeyboardMarkup()
             back_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
-            edit_or_replace(cid, mid, call.message.content_type == "text", ref_msg, markup=back_markup)
+            edit_or_replace(cid, mid, call.message.content_type == "text", ref_msg, markup=back_markup, parse_mode="Markdown")
             return
 
         if data == "my_info":
@@ -1974,6 +2220,7 @@ def callback(call):
             except Exception:
                 info_text = DEFAULT_CONFIG["my_info_text_template"].format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
             info_text = translate_text(info_text, lang)
+            info_text = info_text.replace(str(uid), f"[{uid}](tg://user?id={uid})", 1)
 
             info_markup = types.InlineKeyboardMarkup(row_width=1)
             info_markup.add(types.InlineKeyboardButton(translate_text("ما فُتح من أزرار📮", lang), callback_data="my_unlocked"))
@@ -2016,6 +2263,100 @@ def callback(call):
             unlocked_markup = types.InlineKeyboardMarkup()
             unlocked_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="my_info"))
             edit_or_replace(cid, mid, call.message.content_type == "text", body, markup=unlocked_markup)
+            return
+
+        if data == "tasks_menu":
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
+            db = load_db()
+            tasks = db.get("tasks", [])
+            user_rec = get_user(str(uid)) or {}
+            completed = user_rec.get("completed_tasks", [])
+
+            intro = translate_text(db.get("tasks_menu_text", DEFAULT_CONFIG["tasks_menu_text"]), lang)
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            if not tasks:
+                intro += "\n\n" + translate_text("لا توجد مهام متاحة حالياً.", lang)
+            for task in tasks:
+                if task["id"] in completed:
+                    label = f"✅ {task['name']} ({translate_text('مكتملة', lang)})"
+                    markup.add(types.InlineKeyboardButton(label, callback_data="noop_done_task"))
+                else:
+                    label = f"🔲 {task['name']} — {task['points']} " + translate_text("نقطة", lang)
+                    markup.add(types.InlineKeyboardButton(label, callback_data=f"task_view_{task['id']}"))
+            markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
+
+            edit_or_replace(cid, mid, call.message.content_type == "text", intro, markup=markup, parse_mode="Markdown")
+            return
+
+        if data == "noop_done_task":
+            bot.answer_callback_query(call.id)
+            return
+
+        if data.startswith("task_view_"):
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
+            task_id = data[len("task_view_"):]
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.answer_callback_query(call.id, translate_text("⚠️ هذه المهمة لم تعد متاحة.", lang), show_alert=True)
+                return
+
+            target = task["target"]
+            join_hint = f"https://t.me/{target.lstrip('@')}" if target.startswith("@") else str(target)
+
+            text = (
+                f"🎯 **{task['name']}**\n\n"
+                f"{task.get('description', '')}\n\n"
+                + translate_text(f"📡 انضم إلى: {join_hint}", lang) + "\n"
+                + translate_text(f"🎁 المكافأة عند التحقق: {task['points']} نقطة", lang) + "\n\n"
+                + translate_text("بعد الانضمام، اضغط زر التحقق أدناه:", lang)
+            )
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton(translate_text("✅ تحقق من الانضمام", lang), callback_data=f"task_check_{task_id}"))
+            markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="tasks_menu"))
+            edit_or_replace(cid, mid, call.message.content_type == "text", text, markup=markup, parse_mode="Markdown")
+            return
+
+        if data.startswith("task_check_"):
+            lang = (get_user(str(uid)) or {}).get("language") or "ar"
+            task_id = data[len("task_check_"):]
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.answer_callback_query(call.id, translate_text("⚠️ هذه المهمة لم تعد متاحة.", lang), show_alert=True)
+                return
+
+            user_rec = get_user(str(uid)) or {}
+            if task_id in user_rec.get("completed_tasks", []):
+                bot.answer_callback_query(call.id, translate_text("✅ أكملت هذه المهمة مسبقاً.", lang), show_alert=True)
+                return
+
+            try:
+                member = bot.get_chat_member(task["target"], uid)
+                is_member = member.status not in ("left", "kicked")
+            except Exception as e:
+                logger.exception("task_check membership lookup failed for %s: %s", task["target"], e)
+                is_member = False
+
+            if not is_member:
+                bot.answer_callback_query(
+                    call.id,
+                    translate_text("⚠️ لم يتم رصد انضمامك بعد. انضم أولاً ثم أعد المحاولة.", lang),
+                    show_alert=True
+                )
+                return
+
+            user_rec.setdefault("completed_tasks", [])
+            user_rec["completed_tasks"].append(task_id)
+            user_rec["points"] = user_rec.get("points", 0) + int(task["points"])
+            save_user(str(uid), user_rec)
+
+            bot.answer_callback_query(
+                call.id,
+                translate_text(f"🎉 تم التحقق! حصلت على {task['points']} نقطة.", lang),
+                show_alert=True
+            )
+            render_main_menu(cid, mid, call.message.content_type == "text", call.from_user, user_rec=user_rec, db=db)
             return
 
         if data == "change_sub_name":
@@ -2151,12 +2492,17 @@ def callback(call):
             if data.startswith("nav_back_"):
                 target = data[len("nav_back_") :]
                 parent_id = None if target == "root" else target
-                user_rec_for_markup = get_user(str(uid)) if parent_id is None else None
-                text = (
-                    main_menu_welcome_text(call.from_user, (user_rec_for_markup or {}).get("language") or "ar")
-                    if parent_id is None
-                    else ((get_button(db, parent_id) or {}).get("name", "اختر:"))
-                )
+                user_rec_for_markup = get_user(str(uid))
+                lang = (user_rec_for_markup or {}).get("language") or "ar"
+                if parent_id is None:
+                    text = main_menu_welcome_text(call.from_user, lang)
+                else:
+                    parent_btn = get_button(db, parent_id) or {}
+                    text, ch = localized_field(parent_btn, "name", lang)
+                    if not text:
+                        text = "اختر:" if lang != "en" else "Choose:"
+                    if ch:
+                        save_db(db)
                 nav_markup = build_nav_markup(db, parent_id, user_rec=user_rec_for_markup)
                 if call.message.content_type != "text":
                     try:
@@ -2186,7 +2532,10 @@ def callback(call):
                 )
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
-                
+
+                if uid != ADMIN_ID and db.get("support_btn_id") == btn_id:
+                    set_state(uid, WAIT_SUPPORT_MESSAGE)
+
                 is_current_text = call.message.content_type == "text"
                 if uid == ADMIN_ID:
                     show_leaf_content(cid, mid, is_current_text, btn, back_only_markup(btn), lang=lang, db=db)
@@ -2334,16 +2683,17 @@ def callback(call):
             user_rec = get_user(uid_str) or {}
             db = load_db()
             is_text = call.message.content_type == "text"
-            if db.get("country_gate_active", True) and user_rec.get("country") is None:
-                render_country_gate(cid, mid, is_text)
-            elif user_rec.get("language") is None:
+            if user_rec.get("language") is None:
                 render_language_gate(cid, mid, is_text)
+            elif db.get("country_gate_active", True) and user_rec.get("country") is None:
+                render_country_gate(cid, mid, is_text)
             else:
                 render_main_menu(cid, mid, is_text, call.from_user)
             return
 
         if data in ("lang_ar", "lang_en", "lang_skip"):
             uid_str = str(uid)
+            db = load_db()
             user_rec = get_user(uid_str) or {}
             user_rec["language_asked"] = True
             note = ""
@@ -2354,7 +2704,11 @@ def callback(call):
                 user_rec["language"] = "en"
                 note = "✅ تم اختيار: 🇬🇧 English"
             save_user(uid_str, user_rec)
-            render_main_menu(cid, mid, call.message.content_type == "text", call.from_user, note)
+
+            if db.get("country_gate_active", True) and not user_rec.get("country_asked"):
+                render_country_gate(cid, mid, call.message.content_type == "text", note)
+            else:
+                render_main_menu(cid, mid, call.message.content_type == "text", call.from_user, note)
             return
 
         if uid != ADMIN_ID:
@@ -2555,7 +2909,7 @@ def callback(call):
                 types.InlineKeyboardButton("🌍 أكثر المستخدمين زيارةً للبوت", callback_data="usr_country_stats")
             )
             markup.add(
-                types.InlineKeyboardButton("⚖️ تعديل رصيد النقاط", callback_data="usr_lookup_prompt"),
+                types.InlineKeyboardButton("⚖️ تعديل رصيد النقاط", callback_data="usr_edit_points_prompt"),
                 types.InlineKeyboardButton("🔙 العودة لوحة التحكم", callback_data="adm_back_main")
             )
             
@@ -2586,6 +2940,18 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_users"))
             bot.edit_message_text(
                 "🔍 أرسل الآن **ID المستخدم** الذي تريد إدارة حسابه (معرفة نقاطه، تعديل رصيده، أو حظره):\n/cancel للإلغاء",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "usr_edit_points_prompt":
+            set_state(uid, WAIT_USER_LOOKUP)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data="adm_users"))
+            bot.edit_message_text(
+                "⚖️ **تعديل رصيد النقاط**\n\n"
+                "أرسل الآن **ID المستخدم** الذي تريد تعديل رصيده من نقاط "
+                "(ستظهر لك بعدها أزرار: إضافة نقاط / خصم نقاط / تصفير النقاط):\n/cancel للإلغاء",
                 cid, mid, reply_markup=markup, parse_mode="Markdown"
             )
             return
@@ -2650,19 +3016,124 @@ def callback(call):
             )
             return
 
-        elif data in ["usr_temp_ban", "usr_autoban_settings", "usr_daily_stats", "usr_points_consumption", "usr_buttons_interaction", "usr_points_distribution"]:
+        elif data in ["usr_temp_ban", "usr_autoban_settings"]:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
             
             titles = {
                 "usr_temp_ban": "⏳ **نظام الحظر المؤقت:**\n\nأرسل ID المستخدم المحدد مع تحديد مدة الحظر.",
                 "usr_autoban_settings": "🛡️ **إعدادات الحظر التلقائي:**\n\nمفعلة لحماية البوت من السبام والتكرار السريع.",
-                "usr_daily_stats": "📊 **الإحصائيات اليومية:**\n\n• نشاط المستخدمين اليوم: نشط\n• العمليات المكتملة بنجاح.",
-                "usr_points_consumption": "💰 **إحصائيات استهلاك النقاط:**\n\n• إجمالي النقاط المستهلكة في فتح الخدمات والملفات.",
-                "usr_buttons_interaction": "📈 **تفاعل الأزرار والخدمات:**\n\n• يتم تتبع جميع النقرات وتفاعل المستخدمين مع أقسام البوت بدقة.",
-                "usr_points_distribution": "🎁 **إحصائيات توزيع النقاط:**\n\n• تفاصيل الهدية اليومية ومكافآت التسجيل والإحالات الموزعة."
             }
             bot.edit_message_text(titles.get(data, "⚙️ قسم قيد التطوير والتحديث المستمر."), cid, mid, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        elif data == "usr_daily_stats":
+            users_data = load_users()
+            all_users = users_data.get("users", {})
+            today_str = time.strftime("%Y-%m-%d", time.gmtime())
+
+            total_users = len(all_users)
+            new_today = sum(1 for u in all_users.values() if u.get("joined_date") == today_str)
+            active_today = sum(1 for u in all_users.values() if u.get("last_visit_date") == today_str)
+            total_visits = sum(int(u.get("visits", 0)) for u in all_users.values())
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            bot.edit_message_text(
+                "📊 **الإحصائيات اليومية:**\n\n"
+                f"• إجمالي المستخدمين المسجَّلين: {total_users}\n"
+                f"• مستخدمون جدد اليوم: {new_today}\n"
+                f"• مستخدمون نشطون اليوم (أرسلوا /start اليوم): {active_today}\n"
+                f"• إجمالي عدد مرات استخدام البوت (كل الأوقات): {total_visits}\n\n"
+                "ℹ️ «جدد/نشطون اليوم» تُحسب بتوقيت UTC، وبدأ تتبعها من تاريخ هذا التحديث.",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "usr_points_consumption":
+            db = load_db()
+            users_data = load_users()
+            all_users = users_data.get("users", {})
+            btn_lookup = {b["id"]: b for b in db.get("buttons", [])}
+
+            total_spent = 0
+            unlock_counts = {}
+            for u in all_users.values():
+                for btn_id in u.get("unlocked", []):
+                    btn = btn_lookup.get(btn_id)
+                    if not btn:
+                        continue
+                    total_spent += int(btn.get("unlock_points", 0))
+                    unlock_counts[btn_id] = unlock_counts.get(btn_id, 0) + 1
+
+            top_unlocked = sorted(unlock_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            lines = [
+                f"• {btn_lookup[bid]['name']} — فُتح {cnt} مرة (بسعر {int(btn_lookup[bid].get('unlock_points', 0))} نقطة حالياً)"
+                for bid, cnt in top_unlocked if bid in btn_lookup
+            ]
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            body = "\n".join(lines) if lines else "لا توجد عمليات فتح مقفولة بعد."
+            bot.edit_message_text(
+                "💰 **إحصائيات استهلاك النقاط:**\n\n"
+                f"• إجمالي النقاط المستهلكة في فتح الخدمات المقفولة: {total_spent}\n"
+                f"• عدد عمليات الفتح الكلي: {sum(unlock_counts.values())}\n\n"
+                f"🏆 **الأكثر فتحاً:**\n{body}",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "usr_buttons_interaction":
+            db = load_db()
+            buttons = [b for b in db.get("buttons", []) if b.get("clicks", 0) > 0]
+            buttons.sort(key=lambda b: b.get("clicks", 0), reverse=True)
+            total_clicks = sum(b.get("clicks", 0) for b in db.get("buttons", []))
+
+            top = buttons[:15]
+            lines = [f"• {b['name']} — {b.get('clicks', 0)} ضغطة" for b in top]
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            body = "\n".join(lines) if lines else "لا توجد بيانات تفاعل بعد."
+            bot.edit_message_text(
+                "📈 **تفاعل الأزرار والخدمات:**\n\n"
+                f"• إجمالي عدد الضغطات على كل الخدمات: {total_clicks}\n\n"
+                f"🏆 **الأكثر تفاعلاً (أعلى 15):**\n{body}\n\n"
+                "ℹ️ يبدأ العدّاد من تاريخ هذا التحديث، ويزيد تلقائياً مع كل ضغطة جديدة.",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+        elif data == "usr_points_distribution":
+            db = load_db()
+            users_data = load_users()
+            all_users = users_data.get("users", {})
+
+            welcome_pts_rate = int(db.get("welcome_points", 1))
+            ref_pts_rate = int(db.get("ref_points", 2))
+            gift_pts_rate = int(db.get("gift_points", 2))
+            country_pts_rate = int(db.get("country_gate_points", 1))
+
+            welcome_recipients = sum(1 for u in all_users.values() if u.get("welcome_bonus_received"))
+            total_referrals = sum(int(u.get("referrals_count", 0)) for u in all_users.values())
+            total_gift_claims = sum(int(u.get("total_gift_claims", 0)) for u in all_users.values())
+            country_recipients = sum(1 for u in all_users.values() if u.get("country_bonus_given"))
+            total_points_held = sum(int(u.get("points", 0)) for u in all_users.values())
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المستخدمين", callback_data="adm_users"))
+            bot.edit_message_text(
+                "🎁 **إحصائيات توزيع النقاط (تقديرية حسب الأسعار الحالية):**\n\n"
+                f"🎉 هدية التسجيل: {welcome_recipients} مستخدم × {welcome_pts_rate} نقطة ≈ {welcome_recipients * welcome_pts_rate}\n"
+                f"🔗 مكافآت الإحالة: {total_referrals} إحالة × {ref_pts_rate} نقطة ≈ {total_referrals * ref_pts_rate}\n"
+                f"🎁 الهدية اليومية: {total_gift_claims} عملية استلام × {gift_pts_rate} نقطة ≈ {total_gift_claims * gift_pts_rate}\n"
+                f"🌍 مكافأة اختيار الدولة: {country_recipients} مستخدم × {country_pts_rate} نقطة ≈ {country_recipients * country_pts_rate}\n\n"
+                f"💼 إجمالي النقاط الموجودة حالياً بحسابات كل المستخدمين: {total_points_held}\n\n"
+                "ℹ️ الأرقام تقديرية بناءً على السعر الحالي لكل ميزة؛ إن غيّرت الأسعار سابقاً "
+                "فالمبالغ الفعلية الممنوحة تاريخياً قد تختلف قليلاً عن هذا التقدير.",
+                cid, mid, reply_markup=markup, parse_mode="Markdown"
+            )
             return
 
         elif data.startswith("usropt_"):
@@ -2806,6 +3277,187 @@ def handle_state(message):
         except ValueError:
             bot.send_message(cid, "❌ خطأ: يرجى إرسال رقم صحيح لعدد النقاط.")
 
+    elif state == WAIT_TASK_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل اسم المهمة كنص من فضلك.")
+            return
+        name_text = message.text.strip()
+        d = get_data(uid)
+        if d.get("edit"):
+            task_id = d.get("task_id")
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.send_message(cid, "⚠️ هذه المهمة لم تعد موجودة.")
+                clear_state(uid)
+                return
+            task["name"] = name_text
+            save_db(db)
+            clear_state(uid)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"adm_task_view_{task_id}"))
+            bot.send_message(cid, f"✅ تم تغيير اسم المهمة إلى: «{name_text}»", reply_markup=markup)
+        else:
+            set_state(uid, WAIT_TASK_DESC, name=name_text)
+            bot.send_message(
+                cid,
+                f"✅ الاسم: «{name_text}»\n\n"
+                "**الخطوة 2 من 4:** أرسل الآن وصف المهمة (يظهر للمستخدم قبل تنفيذها):\n/cancel للإلغاء",
+                parse_mode="Markdown"
+            )
+
+    elif state == WAIT_TASK_DESC:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل الوصف كنص من فضلك.")
+            return
+        desc_text = message.text.strip()
+        d = get_data(uid)
+        if d.get("edit"):
+            task_id = d.get("task_id")
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.send_message(cid, "⚠️ هذه المهمة لم تعد موجودة.")
+                clear_state(uid)
+                return
+            task["description"] = desc_text
+            save_db(db)
+            clear_state(uid)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"adm_task_view_{task_id}"))
+            bot.send_message(cid, "✅ تم تحديث وصف المهمة.", reply_markup=markup)
+        else:
+            set_state(uid, WAIT_TASK_CHANNEL, name=d.get("name"), description=desc_text)
+            bot.send_message(
+                cid,
+                "✅ تم حفظ الوصف.\n\n"
+                "**الخطوة 3 من 4:** أرسل الآن معرّف القناة/المجموعة/البوت الذي يجب على المستخدم "
+                "الانضمام إليه (مثال: `@my_channel`). **مهم:** يجب أن يكون البوت مشرفاً (Admin) "
+                "في تلك القناة/المجموعة حتى يقدر يتحقق من انضمام الأعضاء إليها:\n/cancel للإلغاء",
+                parse_mode="Markdown"
+            )
+
+    elif state == WAIT_TASK_CHANNEL:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل المعرّف كنص من فضلك.")
+            return
+        channel_text = message.text.strip()
+        d = get_data(uid)
+        if d.get("edit"):
+            task_id = d.get("task_id")
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.send_message(cid, "⚠️ هذه المهمة لم تعد موجودة.")
+                clear_state(uid)
+                return
+            task["target"] = channel_text
+            save_db(db)
+            clear_state(uid)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"adm_task_view_{task_id}"))
+            bot.send_message(cid, f"✅ تم تحديث القناة/المجموعة إلى: `{channel_text}`", reply_markup=markup, parse_mode="Markdown")
+        else:
+            set_state(uid, WAIT_TASK_POINTS, name=d.get("name"), description=d.get("description"), target=channel_text)
+            bot.send_message(
+                cid,
+                f"✅ تم حفظ: `{channel_text}`\n\n"
+                "**الخطوة 4 من 4:** أرسل الآن عدد النقاط التي سيحصل عليها المستخدم عند إكمال هذه المهمة (رقم صحيح):\n/cancel للإلغاء",
+                parse_mode="Markdown"
+            )
+
+    elif state == WAIT_TASK_POINTS:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل عدد النقاط برقم صحيح.")
+            return
+        try:
+            points_val = int(message.text.strip())
+        except ValueError:
+            bot.send_message(cid, "❌ خطأ: يرجى إرسال رقم صحيح لعدد النقاط.")
+            return
+
+        d = get_data(uid)
+        if d.get("edit"):
+            task_id = d.get("task_id")
+            db = load_db()
+            task = next((t for t in db.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                bot.send_message(cid, "⚠️ هذه المهمة لم تعد موجودة.")
+                clear_state(uid)
+                return
+            task["points"] = points_val
+            save_db(db)
+            clear_state(uid)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"adm_task_view_{task_id}"))
+            bot.send_message(cid, f"✅ تم تحديث عدد النقاط إلى: {points_val}", reply_markup=markup)
+        else:
+            db = load_db()
+            db.setdefault("tasks", [])
+            new_task = {
+                "id": new_id(),
+                "name": d.get("name", "مهمة بدون اسم"),
+                "description": d.get("description", ""),
+                "target": d.get("target", ""),
+                "points": points_val,
+            }
+            db["tasks"].append(new_task)
+            save_db(db)
+            clear_state(uid)
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔙 عودة لإدارة المهام", callback_data="adm_tasks_menu"))
+            bot.send_message(
+                cid,
+                "✅ **تم إنشاء المهمة بنجاح!**\n\n"
+                f"• الاسم: {new_task['name']}\n"
+                f"• الوصف: {new_task['description']}\n"
+                f"• القناة/المجموعة: `{new_task['target']}`\n"
+                f"• النقاط: {new_task['points']}\n\n"
+                "⚠️ تأكد أن البوت أُضيف كمشرف في هذه القناة/المجموعة، وإلا لن يقدر يتحقق من انضمام المستخدمين.",
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+
+    elif state == WAIT_SUPPORT_MESSAGE:
+        clear_state(uid)
+        u = message.from_user
+        display_name = get_display_name(u)
+        username_part = f"@{u.username}" if u.username else "(لا يوجد يوزر)"
+        header = (
+            "📩 **رسالة جديدة من زر تواصل الدعم:**\n\n"
+            f"👤 الاسم: {display_name}\n"
+            f"📛 اليوزر: {username_part}\n"
+            f"🆔 الآيدي: [{u.id}](tg://user?id={u.id})"
+        )
+        try:
+            bot.send_message(ADMIN_ID, header, parse_mode="Markdown")
+            bot.forward_message(ADMIN_ID, cid, message.message_id)
+        except Exception as e:
+            logger.exception("Failed to relay support message to admin: %s", e)
+
+        db = load_db()
+        lang = (get_user(str(uid)) or {}).get("language") or "ar"
+        received_text = translate_text(
+            db.get("support_received_text", DEFAULT_CONFIG["support_received_text"]), lang
+        )
+        bot.send_message(cid, received_text)
+        return
+
+    elif state == WAIT_SUPPORT_RECEIVED_TEXT:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل النص كرسالة نصية من فضلك.")
+            return
+        new_text = message.text.strip()
+        db = load_db()
+        db["support_received_text"] = new_text
+        save_db(db)
+        clear_state(uid)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة", callback_data="adm_support_settings"))
+        bot.send_message(cid, f"✅ تم تحديث رسالة الاستلام:\n\n«{new_text}»", reply_markup=markup)
+        return
+
     elif state == WAIT_ENTER_GIFT_CODE:
         if message.content_type != "text":
             bot.send_message(cid, "⚠️ أرسل الكود كنص من فضلك.")
@@ -2929,7 +3581,7 @@ def handle_state(message):
             bot.send_message(
                 cid,
                 f"👤 **معلومات المستخدم:**\n\n"
-                f"• الآيدي (`ID`): `{target_id}`\n"
+                f"• الآيدي (`ID`): [{target_id}](tg://user?id={target_id})\n"
                 f"• الاسم: {name}\n"
                 f"• الرصيد الحالي: **{points}** نقطة\n"
                 f"• عدد الإحالات: {ref_count}\n"
@@ -3148,6 +3800,27 @@ def handle_state(message):
         bot.send_message(
             cid,
             f"✅ **تم تغيير نص زر «لغة البوت» بنجاح!**\n\n• النص الجديد: {new_name}",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    elif state == WAIT_TASKS_BTN_NAME:
+        if message.content_type != "text":
+            bot.send_message(cid, "⚠️ أرسل النص كرسالة نصية من فضلك.")
+            return
+        new_name = message.text.strip()
+        db = load_db()
+        new_name = merge_emoji(db.get("tasks_btn_name", ""), new_name)
+        db["tasks_btn_name"] = new_name
+        save_db(db)
+        clear_state(uid)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 عودة", callback_data="adm_fixed_texts"))
+        bot.send_message(
+            cid,
+            f"✅ **تم تغيير نص زر «مهام مقابل نقاط» بنجاح!**\n\n• النص الجديد: {new_name}",
             reply_markup=markup,
             parse_mode="Markdown"
         )
@@ -3411,3 +4084,4 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
+            
