@@ -146,6 +146,20 @@ def report_admin_error(exc: Exception, context: str = ""):
         logger.exception("Failed to send error message to ADMIN_ID")
 
 
+def escape_markdown(text):
+    """
+    يهرّب رموز صيغة Markdown القديمة الخاصة بتيليجرام (_ * ` [) داخل أي نص حر
+    يكتبه الأدمن أو المستخدم، كي لا يتسبب في خطأ 'can't parse entities' ويفشل
+    إرسال الرسالة بالكامل عند استخدام رموز غير متزنة (مثل تكرار الشرطة السفلية).
+    """
+    if not text:
+        return text
+    text = str(text)
+    for ch in ("\\", "_", "*", "`", "["):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
 def get_display_name(user):
     """يرجع اسم المستخدم بالضبط كما يظهر في حسابه على تيليجرام (الاسم الأول + الأخير)."""
     name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip()
@@ -420,12 +434,12 @@ DEFAULT_CONFIG = {
     "my_info_text_template": "👤 **معلوماتي:**\n\n👤 الاسم: {name}\n🆔 الآيدي: {id}\n🌟 نقاطك الحالية: {points}\n🏆 ترتيبك في قائمة الإحالات: المركز {rank} (بعدد {invites} دعوة)",
     "country_gate_active": True,
     "country_gate_points": 1,
-    "country_gate_text": "🌍 **قبل ما نكمل...**\n\nحاب تختار دولتك أو مكان إقامتك؟ اختيارك اختياري تماماً، وإذا اخترت دولتك تحصل على نقطة إضافية 🎁\n\nاختر قارتك أولاً:",
-    "language_gate_text": "🗣️ **اختر لغتك المفضلة للتعامل مع البوت:**\n\n(هذا الاختيار اختياري ويمكنك تخطيه)",
+    "country_gate_text": "🌍 قبل ما نكمل...\n\nحاب تختار دولتك أو مكان إقامتك؟ اختيارك اختياري تماماً، وإذا اخترت دولتك تحصل على نقطة إضافية 🎁\n\nاختر قارتك أولاً:",
+    "language_gate_text": "🗣️ اختر لغتك المفضلة للتعامل مع البوت:\n\n(هذا الاختيار اختياري ويمكنك تخطيه)",
     "language_btn_name": "🗣️ لغة البوت",
     "tasks": [],
     "tasks_btn_name": "🎯 مهام مقابل نقاط",
-    "tasks_menu_text": "🎯 **مهام مقابل نقاط:**\n\nأكمل أي مهمة من المهام التالية لتحصل على نقاط إضافية فوراً بعد التحقق:",
+    "tasks_menu_text": "🎯 مهام مقابل نقاط:\n\nأكمل أي مهمة من المهام التالية لتحصل على نقاط إضافية فوراً بعد التحقق:",
     "support_btn_id": None,
     "support_received_text": "✅ تم استلام رسالتك بنجاح وهي الآن قيد المراجعة، وسيتم الرد عليك في أقرب وقت ممكن. شكراً لتواصلك معنا! 🙏"
 }
@@ -1013,7 +1027,7 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
             needs_save = needs_save or ch
             unlock_pts = int(btn.get("unlock_points", 0))
             is_locked = unlock_pts > 0
-            label = f"{unlock_pts} نقطة 🔒" if is_locked else name
+            label = f"{name} 🔒" if is_locked else name
             items.append((label, f"nav_{btn['id']}"))
 
         items.append((gift_name, "gift_claim"))
@@ -1043,7 +1057,7 @@ def build_nav_markup(db, parent_id=None, user_rec=None):
                 needs_save = needs_save or ch
                 unlock_pts = int(btn.get("unlock_points", 0))
                 is_locked = unlock_pts > 0
-                label = f"{unlock_pts} نقطة 🔒" if is_locked else name
+                label = f"{name} 🔒" if is_locked else name
                 row_buttons.append(
                     types.InlineKeyboardButton(label, callback_data=f"nav_{btn['id']}")
                 )
@@ -1093,9 +1107,9 @@ def render_country_gate(cid, mid, is_current_text, prefix_text="", db=None):
         ])
     markup.add(types.InlineKeyboardButton("⏭️ تخطي (بدون تحديد دولة)", callback_data="country_skip"))
     if mid:
-        edit_or_replace(cid, mid, is_current_text, text, markup=markup, parse_mode="Markdown")
+        edit_or_replace(cid, mid, is_current_text, text, markup=markup)
     else:
-        bot.send_message(cid, text, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(cid, text, reply_markup=markup)
 
 
 def render_country_list(cid, mid, is_current_text, continent_index, page=0):
@@ -1140,9 +1154,9 @@ def render_language_gate(cid, mid, is_current_text, prefix_text="", db=None):
     )
     markup.add(types.InlineKeyboardButton("⏭️ تخطي", callback_data="lang_skip"))
     if mid:
-        edit_or_replace(cid, mid, is_current_text, text, markup=markup, parse_mode="Markdown")
+        edit_or_replace(cid, mid, is_current_text, text, markup=markup)
     else:
-        bot.send_message(cid, text, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(cid, text, reply_markup=markup)
 
 
 def enter_bot_gate(cid, mid, is_current_text, user_obj, prefix_text="", db=None, user_rec=None):
@@ -1650,9 +1664,9 @@ def callback(call):
             markup.add(types.InlineKeyboardButton("🗑️ حذف هذه المهمة نهائياً", callback_data=f"adm_task_delete_{task_id}"))
             markup.add(types.InlineKeyboardButton("🔙 رجوع لإدارة المهام", callback_data="adm_tasks_menu"))
             bot.edit_message_text(
-                f"🎯 **تفاصيل المهمة:** «{task['name']}»\n\n"
-                f"• الوصف: {task.get('description', '(بدون وصف)')}\n"
-                f"• القناة/المجموعة/البوت المطلوب الانضمام إليه: `{task['target']}`\n"
+                f"🎯 **تفاصيل المهمة:** «{escape_markdown(task['name'])}»\n\n"
+                f"• الوصف: {escape_markdown(task.get('description', '(بدون وصف)'))}\n"
+                f"• القناة/المجموعة/البوت المطلوب الانضمام إليه: `{escape_markdown(task['target'])}`\n"
                 f"• عدد النقاط عند الإكمال: {task['points']}\n"
                 f"• عدد المستخدمين الذين أكملوها: **{completed_count}**\n"
                 f"• إجمالي النقاط الممنوحة من هذه المهمة (تقديري بالسعر الحالي): {completed_count * task['points']}\n\n"
@@ -2177,19 +2191,19 @@ def callback(call):
             for idx, (u_id, u_info) in enumerate(top_5):
                 count = u_info.get("referrals_count", 0)
                 medal = medals[idx] if idx < len(medals) else "🏅"
-                top_lines.append(f"{medal} : ({count}) -> {u_id}")
+                top_lines.append(f"{medal} : ({count}) -> @@ID{u_id}@@")
             
             top_text = "\n".join(top_lines) if top_lines else translate_text("لا يوجد مستخدمون بعد.", lang)
             
             db_local = load_db()
-            ref_template = db_local.get("ref_info_text_template", DEFAULT_CONFIG["ref_info_text_template"])
+            ref_template = escape_markdown(db_local.get("ref_info_text_template", DEFAULT_CONFIG["ref_info_text_template"]))
             try:
-                ref_msg = ref_template.format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
+                ref_msg = ref_template.format(ref_link=escape_markdown(ref_link), my_invites=my_invites, top_text=top_text)
             except Exception:
-                ref_msg = DEFAULT_CONFIG["ref_info_text_template"].format(ref_link=ref_link, my_invites=my_invites, top_text=top_text)
+                ref_msg = escape_markdown(DEFAULT_CONFIG["ref_info_text_template"]).format(ref_link=escape_markdown(ref_link), my_invites=my_invites, top_text=top_text)
             ref_msg = translate_text(ref_msg, lang)
             for u_id, _ in top_5:
-                ref_msg = ref_msg.replace(str(u_id), f"[{u_id}](tg://user?id={u_id})", 1)
+                ref_msg = ref_msg.replace(f"@@ID{u_id}@@", f"[{u_id}](tg://user?id={u_id})", 1)
 
             back_markup = types.InlineKeyboardMarkup()
             back_markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
@@ -2214,13 +2228,14 @@ def callback(call):
             rank = next((i + 1 for i, (u_id, _) in enumerate(sorted_users) if u_id == uid_str), len(sorted_users))
 
             db_local = load_db()
-            info_template = db_local.get("my_info_text_template", DEFAULT_CONFIG["my_info_text_template"])
+            info_template = escape_markdown(db_local.get("my_info_text_template", DEFAULT_CONFIG["my_info_text_template"]))
+            safe_name = escape_markdown(display_name)
             try:
-                info_text = info_template.format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
+                info_text = info_template.format(name=safe_name, id="@@MYID@@", points=points, rank=rank, invites=my_invites)
             except Exception:
-                info_text = DEFAULT_CONFIG["my_info_text_template"].format(name=display_name, id=uid, points=points, rank=rank, invites=my_invites)
+                info_text = escape_markdown(DEFAULT_CONFIG["my_info_text_template"]).format(name=safe_name, id="@@MYID@@", points=points, rank=rank, invites=my_invites)
             info_text = translate_text(info_text, lang)
-            info_text = info_text.replace(str(uid), f"[{uid}](tg://user?id={uid})", 1)
+            info_text = info_text.replace("@@MYID@@", f"[{uid}](tg://user?id={uid})", 1)
 
             info_markup = types.InlineKeyboardMarkup(row_width=1)
             info_markup.add(types.InlineKeyboardButton(translate_text("ما فُتح من أزرار📮", lang), callback_data="my_unlocked"))
@@ -2285,7 +2300,7 @@ def callback(call):
                     markup.add(types.InlineKeyboardButton(label, callback_data=f"task_view_{task['id']}"))
             markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="nav_back_root"))
 
-            edit_or_replace(cid, mid, call.message.content_type == "text", intro, markup=markup, parse_mode="Markdown")
+            edit_or_replace(cid, mid, call.message.content_type == "text", intro, markup=markup)
             return
 
         if data == "noop_done_task":
@@ -2305,7 +2320,7 @@ def callback(call):
             join_hint = f"https://t.me/{target.lstrip('@')}" if target.startswith("@") else str(target)
 
             text = (
-                f"🎯 **{task['name']}**\n\n"
+                f"🎯 {task['name']}\n\n"
                 f"{task.get('description', '')}\n\n"
                 + translate_text(f"📡 انضم إلى: {join_hint}", lang) + "\n"
                 + translate_text(f"🎁 المكافأة عند التحقق: {task['points']} نقطة", lang) + "\n\n"
@@ -2314,7 +2329,7 @@ def callback(call):
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton(translate_text("✅ تحقق من الانضمام", lang), callback_data=f"task_check_{task_id}"))
             markup.add(types.InlineKeyboardButton(t("back", lang), callback_data="tasks_menu"))
-            edit_or_replace(cid, mid, call.message.content_type == "text", text, markup=markup, parse_mode="Markdown")
+            edit_or_replace(cid, mid, call.message.content_type == "text", text, markup=markup)
             return
 
         if data.startswith("task_check_"):
@@ -2533,7 +2548,7 @@ def callback(call):
             else:
                 unlock_pts = int(btn.get("unlock_points", 0))
 
-                if uid != ADMIN_ID and db.get("support_btn_id") == btn_id:
+                if db.get("support_btn_id") == btn_id:
                     set_state(uid, WAIT_SUPPORT_MESSAGE)
 
                 is_current_text = call.message.content_type == "text"
@@ -2554,10 +2569,10 @@ def callback(call):
                         if ch:
                             save_db(db)
                         markup = types.InlineKeyboardMarkup()
-                        markup.add(types.InlineKeyboardButton(f"🔓 فتح الخدمة بـ {unlock_pts} نقطة", callback_data=f"pay_{btn_id}"))
+                        markup.add(types.InlineKeyboardButton(f"{unlock_pts} نقطة 🔒", callback_data=f"pay_{btn_id}"))
                         markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data=f"nav_back_{btn.get('parent_id', 'root')}"))
                         
-                        payment_text = f"🔒 **خدمة مدفوعة**\n\n{desc}\n\n⚠️ **تكلفة الفتح:** {unlock_pts} نقطة."
+                        payment_text = f"🔒 **خدمة مدفوعة**\n\n{escape_markdown(desc)}\n\n⚠️ **تكلفة الفتح:** {unlock_pts} نقطة."
                         
                         if call.message.content_type != "text":
                             try:
@@ -3356,12 +3371,12 @@ def handle_state(message):
             clear_state(uid)
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 عودة للمهمة", callback_data=f"adm_task_view_{task_id}"))
-            bot.send_message(cid, f"✅ تم تحديث القناة/المجموعة إلى: `{channel_text}`", reply_markup=markup, parse_mode="Markdown")
+            bot.send_message(cid, f"✅ تم تحديث القناة/المجموعة إلى: `{escape_markdown(channel_text)}`", reply_markup=markup, parse_mode="Markdown")
         else:
             set_state(uid, WAIT_TASK_POINTS, name=d.get("name"), description=d.get("description"), target=channel_text)
             bot.send_message(
                 cid,
-                f"✅ تم حفظ: `{channel_text}`\n\n"
+                f"✅ تم حفظ: `{escape_markdown(channel_text)}`\n\n"
                 "**الخطوة 4 من 4:** أرسل الآن عدد النقاط التي سيحصل عليها المستخدم عند إكمال هذه المهمة (رقم صحيح):\n/cancel للإلغاء",
                 parse_mode="Markdown"
             )
@@ -3410,9 +3425,9 @@ def handle_state(message):
             bot.send_message(
                 cid,
                 "✅ **تم إنشاء المهمة بنجاح!**\n\n"
-                f"• الاسم: {new_task['name']}\n"
-                f"• الوصف: {new_task['description']}\n"
-                f"• القناة/المجموعة: `{new_task['target']}`\n"
+                f"• الاسم: {escape_markdown(new_task['name'])}\n"
+                f"• الوصف: {escape_markdown(new_task['description'])}\n"
+                f"• القناة/المجموعة: `{escape_markdown(new_task['target'])}`\n"
                 f"• النقاط: {new_task['points']}\n\n"
                 "⚠️ تأكد أن البوت أُضيف كمشرف في هذه القناة/المجموعة، وإلا لن يقدر يتحقق من انضمام المستخدمين.",
                 reply_markup=markup,
@@ -3426,15 +3441,25 @@ def handle_state(message):
         username_part = f"@{u.username}" if u.username else "(لا يوجد يوزر)"
         header = (
             "📩 **رسالة جديدة من زر تواصل الدعم:**\n\n"
-            f"👤 الاسم: {display_name}\n"
-            f"📛 اليوزر: {username_part}\n"
+            f"👤 الاسم: {escape_markdown(display_name)}\n"
+            f"📛 اليوزر: {escape_markdown(username_part)}\n"
             f"🆔 الآيدي: [{u.id}](tg://user?id={u.id})"
         )
         try:
             bot.send_message(ADMIN_ID, header, parse_mode="Markdown")
+        except Exception as e:
+            logger.exception("Failed to send support header (markdown), retrying as plain text: %s", e)
+            try:
+                bot.send_message(
+                    ADMIN_ID,
+                    f"📩 رسالة جديدة من زر تواصل الدعم:\n\n👤 الاسم: {display_name}\n📛 اليوزر: {username_part}\n🆔 الآيدي: {u.id}"
+                )
+            except Exception as e2:
+                logger.exception("Failed to send support header as plain text too: %s", e2)
+        try:
             bot.forward_message(ADMIN_ID, cid, message.message_id)
         except Exception as e:
-            logger.exception("Failed to relay support message to admin: %s", e)
+            logger.exception("Failed to forward support message to admin: %s", e)
 
         db = load_db()
         lang = (get_user(str(uid)) or {}).get("language") or "ar"
@@ -3582,7 +3607,7 @@ def handle_state(message):
                 cid,
                 f"👤 **معلومات المستخدم:**\n\n"
                 f"• الآيدي (`ID`): [{target_id}](tg://user?id={target_id})\n"
-                f"• الاسم: {name}\n"
+                f"• الاسم: {escape_markdown(name)}\n"
                 f"• الرصيد الحالي: **{points}** نقطة\n"
                 f"• عدد الإحالات: {ref_count}\n"
                 f"• الحالة: {'محظور 🚫' if is_banned else 'غير محظور ✅'}\n\n"
