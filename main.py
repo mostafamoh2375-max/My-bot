@@ -2196,11 +2196,11 @@ def callback(call):
             top_text = "\n".join(top_lines) if top_lines else translate_text("لا يوجد مستخدمون بعد.", lang)
             
             db_local = load_db()
-            ref_template = escape_markdown(db_local.get("ref_info_text_template", DEFAULT_CONFIG["ref_info_text_template"]))
+            ref_template = db_local.get("ref_info_text_template", DEFAULT_CONFIG["ref_info_text_template"])
             try:
                 ref_msg = ref_template.format(ref_link=escape_markdown(ref_link), my_invites=my_invites, top_text=top_text)
             except Exception:
-                ref_msg = escape_markdown(DEFAULT_CONFIG["ref_info_text_template"]).format(ref_link=escape_markdown(ref_link), my_invites=my_invites, top_text=top_text)
+                ref_msg = DEFAULT_CONFIG["ref_info_text_template"].format(ref_link=escape_markdown(ref_link), my_invites=my_invites, top_text=top_text)
             ref_msg = translate_text(ref_msg, lang)
             for u_id, _ in top_5:
                 ref_msg = ref_msg.replace(f"@@ID{u_id}@@", f"[{u_id}](tg://user?id={u_id})", 1)
@@ -4109,4 +4109,3 @@ while True:
         except Exception:
             logger.exception("Failed to notify admin about polling crash")
             time.sleep(5)
-        
